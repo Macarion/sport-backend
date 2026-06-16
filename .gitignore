@@ -1,0 +1,102 @@
+### Django ###
+# 字节码和缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 数据库文件
+*.sqlite3
+*.db
+
+# 环境文件
+.env
+.env.local
+.env/*
+
+# 静态文件和媒体文件
+/staticfiles/
+/media/
+/video/
+/api/video/
+/api/migrations
+
+
+# 日志和本地设置
+*.log
+local_settings.py
+
+# 测试覆盖率
+.coverage
+htmlcov/
+
+# 分发和打包
+/dist/
+/build/
+*.egg-info/
+*.egg
+
+
+### Vue ###
+# 依赖目录
+node_modules/
+/dist/
+/.temp/
+/.cache/
+
+# 环境文件
+.env.local
+.env.*.local
+
+# 日志文件
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器目录
+.vscode/
+.idea/
+
+
+### IDE ###
+# VSCode
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.vscode/*
+
+# PyCharm
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# 通用
+.DS_Store
+*.swp
+*.swo
+
+
+### Python ###
+# 虚拟环境
+venv/
+ENV/
+env/
+.venv/
+
+# 安装包缓存
+.python-version
+
+
+### 系统文件 ###
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes

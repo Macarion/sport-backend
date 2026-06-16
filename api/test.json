@@ -1,0 +1,12 @@
+{
+  "execution_point": "userid_check",
+  "username": "24120324",
+  "userid_converted": 24120324,
+  "userid_valid": true,
+  "scores": {
+    "num": 0,
+    "num_all": 0
+  },
+  "timestamp": "2026-06-16T09:56:34",
+  "will_proceed": true
+}
