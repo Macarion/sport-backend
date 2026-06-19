@@ -3,6 +3,7 @@ from django.http import JsonResponse,HttpResponseBadRequest
 # Create your views here.
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.core.handlers.asgi import ASGIRequest
 from rest_framework.decorators import api_view
 
 from api.models import  Class,Student   # 假设你有一个Student模型
@@ -56,6 +57,21 @@ from api.authentication import RemoteIntrospectJWTAuthentication
 import requests  # 2026-01-08 视频下载：后端通过 HTTP 调用媒体服务器 best-video 接口
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.core.validators import validate_email
+
+from api.user_manager import UserManager
+from api.config import CAMERA_INDEX
+from django.http import JsonResponse, HttpResponse
+
+from .sitreach import (
+    sitreach_start,
+    sitreach_process_frame,
+    sitreach_fetch_inc_data,
+    sitreach_stop,
+    sitreach_get_latest_frame,
+    sitreach_start_local_camera,
+    sitreach_stop_local_camera,
+)
+
 # import oss2
 _auth_http = requests.Session()
 _auth_http.trust_env = False  # 不使用系统代理
@@ -3958,3 +3974,144 @@ class AdminStudentsDeleteView(AdminGuardedAPIView):
             {"success": True, "message": f"已删除 {deleted_count} 位学生"},
             status=status.HTTP_200_OK,
         )
+
+
+def situp_start(request):
+
+    uid = request.GET.get("uid")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    res = UserManager().start_sport_test(uid, "situp")
+
+    if res:
+        return JsonResponse({"success": True, "message": "开始体测"}, status=status.HTTP_200_OK)
+    else:
+        return JsonResponse({"success": False, "message": "体测开始失败"}, status=status.HTTP_400_BAD_REQUEST)
+
+def situp_stop(request):
+
+    uid = request.GET.get("uid")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().stop_sport_test(uid)
+
+    return JsonResponse({"success": True, "message": "体测结束"}, status=status.HTTP_200_OK)
+
+def pullup_start(request):
+
+    uid = request.GET.get("uid")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().start_sport_test(uid, "pullup")
+
+    return JsonResponse({"success": True, "message": "体测开始"}, status=status.HTTP_200_OK)
+
+def pullup_stop(request):
+
+    uid = request.GET.get("uid")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().stop_sport_test(uid)
+
+    return JsonResponse({"success": True, "message": "体测结束"}, status=status.HTTP_200_OK)
+
+def sitreach_start_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().start_sport_test(uid, "sitreach")
+
+    return JsonResponse({"success": True, "message": "体测开始"}, status=status.HTTP_200_OK)
+
+
+def sitreach_stop_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().stop_sport_test(uid)
+
+    return JsonResponse({"success": True, "message": "体测结束"}, status=status.HTTP_200_OK)
+
+
+def sitreach_fetch_inc_data_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    return JsonResponse(sitreach_fetch_inc_data(uid))
+
+
+def sitreach_get_img_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    draw = request.GET.get("draw", "1") != "0"
+
+    img = sitreach_get_latest_frame(uid, draw=draw)
+
+    if img is None:
+        return HttpResponse(status=404)
+
+    return HttpResponse(img, content_type="image/jpeg")
+
+# 可删
+def sitreach_start_local_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    return JsonResponse(sitreach_start_local_camera(uid, CAMERA_INDEX))
+
+
+def sitreach_stop_local_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    return JsonResponse(sitreach_stop_local_camera(uid))
+
+def standjump_start_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().start_sport_test(uid, "jump")
+
+    return JsonResponse({"success": True, "message": "体测开始"}, status=status.HTTP_200_OK)
+
+
+def standjump_stop_view(request):
+    uid = request.GET.get("uid") or request.GET.get("username")
+    if not uid:
+        print("DEBUG: Username is missing or empty, returning error")
+        return JsonResponse(
+            {"status": "error", "message": "uid is required"},
+            status=400,
+        )
+
+    UserManager().stop_sport_test(uid)
+
+    return JsonResponse({"success": True, "message": "体测结束"}, status=status.HTTP_200_OK)

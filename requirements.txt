@@ -1,3 +1,4 @@
+daphne==4.2.2
 Django==5.2.6
 Jinja2==3.1.6
 Kivy==2.3.1
@@ -90,6 +91,7 @@ pyinstaller==6.13.0
 pyinstaller-hooks-contrib==2025.2
 pyotp==2.9.0
 pyparsing==3.2.3
+pyserial==3.5
 #pypiwin32==223
 python-dateutil==2.9.0.post0
 pyttsx3==2.99

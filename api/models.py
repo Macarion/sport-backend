@@ -404,6 +404,97 @@ class Testrecord(models.Model):
         db_table = 'testrecord'
 
 
+class UwbRawRecord(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    uid = models.CharField(max_length=64, blank=True, null=True)
+    session_id = models.CharField(max_length=64, blank=True, null=True)
+    source = models.CharField(max_length=64, default='serial_forwarder')
+    raw_line = models.TextField()
+    record_type = models.CharField(max_length=20, default='UNKNOWN')
+    tag_id = models.IntegerField(blank=True, null=True)
+    cycle = models.IntegerField(blank=True, null=True)
+    timestamp_us = models.BigIntegerField(blank=True, null=True)
+    timestamp_ms = models.BigIntegerField(blank=True, null=True)
+    parsed_json = models.JSONField(blank=True, null=True)
+    unified_json = models.JSONField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        db_table = 'uwb_raw_record'
+
+
+class UwbSession(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    session_id = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=128, blank=True, null=True)
+    status = models.CharField(max_length=20, default='active')
+    started_at = models.DateTimeField(blank=True, null=True)
+    ended_at = models.DateTimeField(blank=True, null=True)
+    anchors_json = models.JSONField(blank=True, null=True)
+    remark = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'uwb_session'
+
+
+class UwbTagBinding(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    tag_id = models.IntegerField(unique=True)
+    uid = models.CharField(max_length=64)
+    username = models.CharField(max_length=128, blank=True, null=True)
+    runner_group = models.CharField(max_length=128, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'uwb_tag_binding'
+
+
+class UwbSessionTagBinding(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    session_id = models.CharField(max_length=64)
+    tag_id = models.IntegerField()
+    uid = models.CharField(max_length=64)
+    username = models.CharField(max_length=128, blank=True, null=True)
+    runner_group = models.CharField(max_length=128, blank=True, null=True)
+    bound_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        managed = False
+        db_table = 'uwb_session_tag_binding'
+
+
+class UwbTrackPoint(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    raw_record_id = models.BigIntegerField(blank=True, null=True)
+    session_id = models.CharField(max_length=64, blank=True, null=True)
+    tag_id = models.IntegerField()
+    uid = models.CharField(max_length=64, blank=True, null=True)
+    username = models.CharField(max_length=128, blank=True, null=True)
+    runner_group = models.CharField(max_length=128, blank=True, null=True)
+    timestamp_ms = models.BigIntegerField(blank=True, null=True)
+    cycle = models.IntegerField(blank=True, null=True)
+    x = models.FloatField(blank=True, null=True)
+    y = models.FloatField(blank=True, null=True)
+    z = models.FloatField(blank=True, null=True)
+    d0 = models.FloatField(blank=True, null=True)
+    d1 = models.FloatField(blank=True, null=True)
+    d2 = models.FloatField(blank=True, null=True)
+    d3 = models.FloatField(blank=True, null=True)
+    speed = models.FloatField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        managed = False
+        db_table = 'uwb_track_point'
+
 # class Users(models.Model):
 #     id = models.AutoField(primary_key=True)  # 显式定义主键字段
 #     username = models.CharField(max_length=30)

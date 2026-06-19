@@ -39,6 +39,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 # Application definition
 
 INSTALLED_APPS = [
+    "channels",
     'corsheaders',
     "django.contrib.admin",
     'api',
@@ -54,6 +55,14 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
 ]
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
+
+ASGI_APPLICATION = 'backend.asgi.application'
 
 # settings.py
 

@@ -7,6 +7,8 @@ import time
 import os
 import matplotlib
 
+from api.base_sport import BaseSport
+
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import numpy as np
@@ -236,6 +238,9 @@ def process_frame(img, num, frame_id, hand_off, IF_START, WIDTH, HEIGHT, correct
     start_time = time.time()
     h, w = img.shape[0], img.shape[1]
     img_RGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    # 避免只读错误
+    img = img.copy()
 
     # 结果
     results = pose.process(img_RGB)
@@ -473,7 +478,7 @@ def ShapeDetection(img):
 datapath1 = mkdir(datapath)
 FILENAME = datapath1 + f'/{filename}-pullup.mp4'
 
-class PULL():
+class PULL(BaseSport):
     def __init__(self, userid: Optional[int] = None):
         self.userid = userid
         self.hand_off, self.num = 0, 0
@@ -1495,6 +1500,54 @@ class PULL():
 
         elif if_open == 0:
             pass
+    
+    def start(self):
+        self.interval = 0.5  # 秒
+        self.last_exec = time.monotonic() - self.interval
+    
+    def update(self, frame, frame_id):
+        frame_data_generator = self.pullup_start(frame, frame.shape[1], frame.shape[0])
+        frame, frame2, img1, num, num_all, IF_START, list_data = next(frame_data_generator)
+
+        with self.lock:
+            self.num = num
+            self.num_all = num_all
+            self.list = list_data
+            self.nums.append(num)
+            self.timestamps.append(datetime.now().isoformat(timespec="milliseconds"))
+
+        now = time.monotonic()
+        if now - self.last_exec >= self.interval:
+            record = {
+                "nums": self.nums.copy(),
+                "num": self.num,
+                "num_all": self.num_all,
+                "timestamps": self.timestamps.copy(),
+                "angles": self.Y.copy() if self.Y else [],
+                # 检测成功条件：环境通过且处于准备状态，并且尚未进入正式开始信号
+                "detectsuccess": self.detectsuccess,
+                "readytohang": self.readytohang,
+                "finished": False,
+            }
+            _append_record(record)
+            self.io_queue.put(('save_img', img1))
+            self.last_exec = now
+
+        result = {
+            "uid": None,
+            "score": self.num,
+            "frame": frame_id,
+            "num_all": self.num_all,
+            "timestamp": int(round(time.time() * 1000)),
+            "angle": self.Y[-1] if self.Y else 0,
+        }
+
+        return result, frame2
+        
+
+    def stop(self):
+        pass
+
 
 # 完成个数：self.num
 # 完成总个数：self.num_all

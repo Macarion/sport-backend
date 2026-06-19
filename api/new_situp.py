@@ -22,6 +22,8 @@ import requests
 import argparse
 from contextlib import ExitStack
 
+from api.base_sport import BaseSport
+
 
 def _write_upload_debug(payload: Dict[str, Any]) -> None:
     try:
@@ -145,6 +147,10 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
     h, w = img.shape[0], img.shape[1]
     img_RGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    # 新建一个空白图像，用于绘制结果
+    # img = np.zeros((h, w, 3), dtype=np.uint8)
+    img = img.copy()
+
     results = pose.process(img_RGB)
 
     if results.pose_landmarks:
@@ -199,7 +205,8 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
             shoulder_y.append(y1)
             heal_x.append(x2)
             heal_y.append(y2)
-        k0 = (shoulder_y[-1] - heal_y[-1])/(shoulder_x[-1] - heal_x[-1])
+        # TODO: 除以0错误
+        k0 = (shoulder_y[-1] - heal_y[-1])/(shoulder_x[-1] - heal_x[-1]) if shoulder_x[-1] - heal_x[-1] != 0 else 0
         b = shoulder_y[-1] - k0*shoulder_x[-1]
         y01, y02 = int(k0*x01+b), int(k0*x02+b)
         img = cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
@@ -501,7 +508,7 @@ def _safe_int(value: Any) -> Optional[int]:
         return None
 
 
-class SITUP():
+class SITUP(BaseSport):
     def __init__(self, username: Optional[str] = None):
         self.username = username
         self.L, self.X, self.X1, self.Lk_filter, self.HX, self.Z, self.frametime, self.leg_lengthr, self.leg_lengthl, self.HY = [], [], [], [], [0], [], [], [], [], [450]
@@ -1038,7 +1045,7 @@ class SITUP():
             cv2.namedWindow('Situp Detection', cv2.WINDOW_NORMAL)
             cv2.resizeWindow('Situp Detection', WIDTH, HEIGHT)
 
-            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # 打开默认摄像头
+            cap = cv2.VideoCapture(3, cv2.CAP_DSHOW)  # 打开默认摄像头
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
             capture_fps = 20.0
@@ -1203,6 +1210,58 @@ class SITUP():
 
         elif if_open == 0:
             pass
+
+    def start(self):
+        self.interval = 0.5  # 秒
+        self.last_exec = time.monotonic() - self.interval
+
+    def update(self, frame, frame_id):
+        # 处理帧数据
+
+        frame_data_generator = self.situp_start(frame, 0, 0)
+        frame2, img1, num, num_all, IF_START, list_data = next(frame_data_generator)
+
+        # 更新共享状态（从处理结果中获取）
+        with self.lock:
+            self.num = num
+            self.num_all = num_all
+            self.nums.append(num)
+            self.timestamps.append(datetime.now().isoformat(timespec="milliseconds"))
+        
+        # 每 0.5 s 执行一次数据记录
+        now = time.monotonic()
+        if now - self.last_exec >= self.interval:
+            with self.lock:
+                record = {
+                    "username": self.username,
+                    "nums": self.nums.copy(),
+                    "num": self.num,
+                    "num_all": self.num_all,
+                    "timestamps": self.timestamps.copy(),
+                    "angles": self.obsY1.copy() if self.obsY1 else [],
+                    # 检测成功条件：环境通过且处于准备状态，并且尚未进入正式开始信号
+                    "detectsuccess": self.detectsuccess,
+                    "finished": False,
+                }
+            _append_record(record)
+            # 异步保存图片
+            self.io_queue.put(('save_img', img1))
+            self.last_exec = now
+        
+
+        result = {
+            "uid": self.username,
+            "score": self.num,
+            "frame": frame_id,
+            "num_all": self.num_all,
+            "timestamp": int(round(time.time() * 1000)),
+            "angle": self.obsY1[-1] if self.obsY1 else 0,
+        }
+    
+        return result, frame2
+    
+    def stop(self):
+        pass
 
 
 # 完成个数：self.num

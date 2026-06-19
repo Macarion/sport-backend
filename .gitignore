@@ -1,3 +1,9 @@
+# 临时文件
+/temp/
+/outputs/
+/api/runtime_data.json
+/api/pullup_runtime_data.json
+
 ### Django ###
 # 字节码和缓存
 __pycache__/
@@ -19,6 +25,7 @@ __pycache__/
 /video/
 /api/video/
 /api/migrations
+/api/vendor/
 
 
 # 日志和本地设置

@@ -2,6 +2,20 @@ from django.urls import path,include
 from . import views
 from .student_bulk import StudentBulkSaveView, StudentBulkGetView
 
+from .uwb_views import (
+    UwbBindingView,
+    UwbFetchIncDataView,
+    UwbIngestView,
+    UwbLatestView,
+    UwbReplayView,
+    UwbReplayWindowView,
+    UwbSessionView,
+    UwbStartView,
+    UwbStopView,
+    UwbStreamView,
+)
+
+
 app_name = 'api'
 
 urlpatterns = [
@@ -13,12 +27,30 @@ urlpatterns = [
     path("api/gen_pdf/", views.gen_pdf, name="gen_pdf"),
     path("api/gen_situp_pdf/", views.gen_situp_pdf, name="gen_situp_pdf"),
     path("api/gen_pullup_pdf/", views.gen_pullup_pdf, name="gen_pullup_pdf"),
-    path("api/script/start/", views.start_script, name="script-start"),
-    path("api/script/stop/",  views.stop_script,  name="script-stop"),
+    path("api/situp/start/", views.situp_start, name="situp-start"),
+    path("api/situp/stop/",  views.situp_stop,  name="situp-stop"),
     path('api/latest_data/', views.latest_data, name='latest_data'), 
-    path("api/pullup/start/", views.start_pullup, name="pullup-start"),
-    path("api/pullup/stop/",  views.stop_pullup,  name="pullup-stop"),
+    path("api/pullup/start/", views.pullup_start, name="pullup-start"),
+    path("api/pullup/stop/",  views.pullup_stop,  name="pullup-stop"),
     path("api/pullup/latest_data/", views.latest_pullup_data, name="pullup-latest_data"),
+    path("api/sitreach/start", views.sitreach_start_view),
+    path("api/sitreach/stop", views.sitreach_stop_view),
+    path("api/sitreach/fetch_inc_data", views.sitreach_fetch_inc_data_view),
+    path("api/sitreach/start_local", views.sitreach_start_local_view),
+    path("api/sitreach/stop_local", views.sitreach_stop_local_view),
+    path("api/sitreach/get_img", views.sitreach_get_img_view),
+    path("api/standjump/start/", views.standjump_start_view),
+    path("api/standjump/stop/", views.standjump_stop_view),
+    path('api/uwb/start/', UwbStartView.as_view(), name='uwb_start'),
+    path('api/uwb/stop/', UwbStopView.as_view(), name='uwb_stop'),
+    path('api/uwb/ingest/', UwbIngestView.as_view(), name='uwb_ingest'),
+    path('api/uwb/stream/', UwbStreamView.as_view(), name='uwb_stream'),
+    path('api/uwb/fetch_inc_data/', UwbFetchIncDataView.as_view(), name='uwb_fetch_inc_data'),
+    path('api/uwb/latest/', UwbLatestView.as_view(), name='uwb_latest'),
+    path('api/uwb/bindings/', UwbBindingView.as_view(), name='uwb_bindings'),
+    path('api/uwb/sessions/', UwbSessionView.as_view(), name='uwb_sessions'),
+    path('api/uwb/replay/', UwbReplayView.as_view(), name='uwb_replay'),
+    path('api/uwb/replay/window/', UwbReplayWindowView.as_view(), name='uwb_replay_window'),
     path('api/get_classes/', views.get_classes, name='get_classes'),
     path('api/get_students/', views.get_students, name='get_students'),
     path('api/register/', views.RegisterView.as_view(), name='login_view'),  # 学生注册
@@ -37,8 +69,8 @@ urlpatterns = [
     path('api/student/userTestingInfo/', views.UserTestingInfoView.as_view(), name='user_testing_info'),
     path('api/student/userTestingImg/', views.UserTestingImgView.as_view(), name='user_testing_img'),
     path('api/student/getStudentInfo/', views.getStudentInfoView.as_view(), name='get_student_info'),
-    path("api/pullup/start/", views.start_pullup, name="pullup-start"),
-    path("api/pullup/stop/", views.stop_pullup, name="pullup-stop"),
+    path("api/pullup/start/", views.pullup_start, name="pullup-start"),
+    path("api/pullup/stop/", views.pullup_stop, name="pullup-stop"),
     path("api/pullup/latest_data/", views.latest_pullup_data, name="pullup-latest_data"),
     path("api/auth/heartbeat/", views.HeartbeatView.as_view(), name="auth-heartbeat"),
     path('api/student/bulk-import/', views.BulkStudentImportView.as_view(), name='bulk_student_import'),  # 2025-12-02 批量导入 student_bulk
