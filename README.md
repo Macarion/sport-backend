@@ -25,6 +25,10 @@ pip install -r requirements.txt
 sudo apt-get install ffmpeg
 ```
 
+### 添加Vendor文件
+
+- 立定跳远的依赖文件，放在`api/vendor`目录下
+
 ### 启动后端
 
 ```
