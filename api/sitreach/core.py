@@ -721,7 +721,7 @@ def sitreach_start_local_camera(uid, camera_id=0):
     _CAMERA_STOP_FLAGS[uid] = stop_flag
 
     def _camera_loop():
-        cap = cv2.VideoCapture(camera_id)
+        cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
