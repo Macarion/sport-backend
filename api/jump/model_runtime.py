@@ -20,12 +20,13 @@ def _setting(name: str, default):
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
-BACKEND_ROOT = PACKAGE_ROOT.parent
+API_ROOT = PACKAGE_ROOT.parent
+BACKEND_ROOT = API_ROOT.parent
 VENDOR_ROOT = BACKEND_ROOT / "vendor"
 PROJECT_ROOT = BACKEND_ROOT
 WCX_DIR = VENDOR_ROOT / "wcx"
 ARUCOTEST_DIR = WCX_DIR / "arucotest"
-YOLO_MODEL_PATH = WCX_DIR / "jump2test" / "yolov8n.pt"
+YOLO_MODEL_PATH = WCX_DIR / "jump2test" / "yolo11n.pt"
 SAM2_CHECKPOINT_PATH = WCX_DIR / "sam2" / "checkpoints" / "sam2.1_hiera_small.pt"
 SAM2_CONFIG_PATH = WCX_DIR / "sam2" / "sam2" / "configs" / "sam2.1" / "sam2.1_hiera_s.yaml"
 
@@ -47,7 +48,7 @@ def validate_vendor_assets() -> None:
         "fast ready 状态机 realtime_aruco_fast_ready.py": WCX_DIR / "realtime_aruco_fast_ready.py",
         "ArUco 测距模块 aruco_measure.py": ARUCOTEST_DIR / "aruco_measure.py",
         "ArUco pipeline 模块 pipeline_aruco.py": ARUCOTEST_DIR / "pipeline_aruco.py",
-        "YOLO 权重 yolov8n.pt": YOLO_MODEL_PATH,
+        "YOLO 权重 yolo11n.pt": YOLO_MODEL_PATH,
         "SAM2 checkpoint sam2.1_hiera_small.pt": SAM2_CHECKPOINT_PATH,
         "SAM2 config sam2.1_hiera_s.yaml": SAM2_CONFIG_PATH,
     }
@@ -55,7 +56,7 @@ def validate_vendor_assets() -> None:
     if missing:
         joined = "\n".join(missing)
         raise FileNotFoundError(
-            "jumpbackend/vendor 资源不完整，无法启动跳远测距服务。缺失文件：\n"
+            "backend/vendor 资源不完整，无法启动 ArUco 跳远测距服务。缺失文件：\n"
             f"{joined}"
         )
 

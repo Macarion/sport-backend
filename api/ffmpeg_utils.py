@@ -2,6 +2,7 @@ import subprocess
 import threading
 import numpy as np
 import queue
+import shutil
 
 # 视频参数
 WIDTH = 640
@@ -96,10 +97,20 @@ class FFmpegVideoHandler:
             print(f"写入ffmpeg失败: {e}")
 
     def start_ffmpeg(self):
+        ffmpeg_exe = shutil.which("ffmpeg")
+        if ffmpeg_exe is None:
+            try:
+                import imageio_ffmpeg
+
+                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception as exc:
+                raise RuntimeError(
+                    "未找到 ffmpeg，且 imageio-ffmpeg 不可用，无法解码前端视频流"
+                ) from exc
 
         return subprocess.Popen(
             [
-                "ffmpeg",
+                ffmpeg_exe,
 
                 "-f", "webm",
                 "-i", "pipe:0",
@@ -117,8 +128,7 @@ class FFmpegVideoHandler:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
 
-            # 调试阶段建议保留
-            stderr=None,
+            stderr=subprocess.DEVNULL,
 
             bufsize=0
         )
