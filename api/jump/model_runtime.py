@@ -26,6 +26,7 @@ VENDOR_ROOT = BACKEND_ROOT / "vendor"
 PROJECT_ROOT = BACKEND_ROOT
 WCX_DIR = VENDOR_ROOT / "wcx"
 ARUCOTEST_DIR = WCX_DIR / "arucotest"
+SAM2_PROJECT_ROOT = WCX_DIR / "sam2"
 YOLO_MODEL_PATH = WCX_DIR / "jump2test" / "yolo11n.pt"
 SAM2_CHECKPOINT_PATH = WCX_DIR / "sam2" / "checkpoints" / "sam2.1_hiera_small.pt"
 SAM2_CONFIG_PATH = WCX_DIR / "sam2" / "sam2" / "configs" / "sam2.1" / "sam2.1_hiera_s.yaml"
@@ -63,7 +64,7 @@ def validate_vendor_assets() -> None:
 
 def ensure_wcx_import_paths() -> RuntimePaths:
     validate_vendor_assets()
-    for path in (ARUCOTEST_DIR, WCX_DIR):
+    for path in (WCX_DIR, ARUCOTEST_DIR, SAM2_PROJECT_ROOT):
         path_str = str(path)
         if path_str not in sys.path:
             sys.path.insert(0, path_str)

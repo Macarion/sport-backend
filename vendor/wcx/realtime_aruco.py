@@ -10,6 +10,7 @@ Replay an existing video through the realtime state machine:
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
@@ -34,12 +35,21 @@ DEFAULT_SAM2_CHECKPOINT = (
     SAM2_PROJECT_ROOT / "checkpoints" / "sam2.1_hiera_small.pt"
 )
 DEFAULT_SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_s.yaml"
-DEFAULT_KEYPOINT_REPO_ROOT = Path(r"D:\Python_Project\all-keypoints-jump-broadcast-main")
+DEFAULT_KEYPOINT_REPO_ROOT = Path(
+    os.environ.get(
+        "JUMP_KEYPOINT_REPO_ROOT",
+        str(WCX_DIR / "all-keypoints-jump-broadcast-main"),
+    )
+)
 DEFAULT_KEYPOINT_WEIGHTS_PATH = (
-    DEFAULT_KEYPOINT_REPO_ROOT
-    / "transformer"
-    / "pretrained_weights"
-    / "jump_broadcast_head_angle_2L.pth.tar"
+    Path(os.environ["JUMP_KEYPOINT_WEIGHTS_PATH"])
+    if os.environ.get("JUMP_KEYPOINT_WEIGHTS_PATH")
+    else (
+        DEFAULT_KEYPOINT_REPO_ROOT
+        / "transformer"
+        / "pretrained_weights"
+        / "jump_broadcast_head_angle_2L.pth.tar"
+    )
 )
 DEFAULT_FONT_CANDIDATES = (
     Path(r"C:\Windows\Fonts\msyh.ttc"),
