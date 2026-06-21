@@ -21,8 +21,26 @@ from api.new_jump import JUMP
 sport_dict = {
     "situp": SITUP,
     "pullup": PULL,
-    "sitreach": SITREACH,   # 此处并未用到，使用的是单独的接口和前端页面，800/1000米跑也是
+    # "sitreach": SITREACH,   # 此处并未用到，使用的是单独的接口和前端页面，800/1000米跑也是
     "jump": JUMP
+}
+
+video_params = {
+    "situp": {
+        "width": 640,
+        "height": 480,
+        "fps": 15,
+    },
+    "pullup": {
+        "width": 640,
+        "height": 480,
+        "fps": 15,
+    },
+    "jump": {
+        "width": 1280,
+        "height": 720,
+        "fps": 15,
+    }
 }
 
 def encode_pil_b64(painting):
@@ -52,7 +70,9 @@ class SportManager:
 
         self.data_queue = queue.Queue()
 
-        self.ffmpeg_handler = FFmpegVideoHandler()
+        vp = video_params[sport_type]
+
+        self.ffmpeg_handler = FFmpegVideoHandler(vp["width"], vp["height"], vp["fps"])
 
     def start(self):
         print("开始测试")

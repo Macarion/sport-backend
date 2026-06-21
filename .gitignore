@@ -1,4 +1,5 @@
 # 临时文件
+result.txt
 /temp/
 /outputs/
 /api/runtime_data.json
@@ -25,7 +26,6 @@ __pycache__/
 /video/
 /api/video/
 /api/migrations
-/api/vendor/
 
 # Large model weights distributed outside Git.
 /vendor/wcx/sam2/checkpoints/sam2.1_hiera_small.pt

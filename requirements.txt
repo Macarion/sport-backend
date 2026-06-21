@@ -15,7 +15,7 @@ aiosignal==1.4.0
 aliyun-python-sdk-core==2.16.0
 aliyun-python-sdk-kms==2.16.5
 altgraph==0.17.4
-asgiref==3.8.1
+asgiref
 attrs==25.3.0
 bcrypt==4.3.0
 beautifulsoup4==4.13.5
