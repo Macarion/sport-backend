@@ -665,6 +665,80 @@ def save_lines(lines: List[str], payload: Dict[str, Any]) -> tuple[List[UwbRawRe
     return saved_records, invalid
 
 
+<<<<<<< HEAD
+=======
+def process_direct_db_records(after_id: int, limit: int, payload: Dict[str, Any]) -> tuple[List[UwbRawRecord], int]:
+    source = str(payload.get("source") or "direct_db")
+    base_uid = payload.get("uid")
+    base_username = payload.get("username")
+    raw_anchors = payload.get("anchors")
+    anchors = normalize_anchor_list(raw_anchors)
+    session_id = normalize_session_id(payload.get("session_id"))
+
+    qs = (
+        UwbRawRecord.objects.filter(id__gt=after_id, unified_json__isnull=True)
+        .exclude(record_type="INVALID")
+        .order_by("id")
+    )
+    raw_records = list(qs[:limit])
+    processed: List[UwbRawRecord] = []
+    invalid_count = 0
+
+    for record in raw_records:
+        parsed = parse_uwb_line(record.raw_line)
+        if not parsed:
+            record.record_type = "INVALID"
+            record.parsed_json = {"error": "parse_failed", "raw_line": record.raw_line}
+            record.source = record.source or source
+            record.save(update_fields=["record_type", "parsed_json", "source"])
+            invalid_count += 1
+            continue
+
+        current_session_id = normalize_session_id(record.session_id) or session_id or resolve_session_id(None, reuse_active=True)
+        touch_session(current_session_id, "active", None, anchors if isinstance(raw_anchors, list) else None)
+        binding = get_binding_for_tag(parsed.get("tagId"), current_session_id)
+        uid = record.uid or base_uid
+        username = base_username
+        unified = build_unified_record(parsed, record.raw_line, uid=uid, username=username, source=record.source or source)
+        unified = apply_binding_to_unified(unified, binding)
+        if binding:
+            uid = binding.get("uid")
+            username = binding.get("username")
+
+        record.uid = str(uid) if uid not in (None, "") else None
+        record.session_id = current_session_id or None
+        record.source = record.source or source
+        record.record_type = str(parsed.get("type") or "UNKNOWN")
+        record.tag_id = parsed.get("tagId")
+        record.cycle = parsed.get("cycle")
+        record.timestamp_us = parsed.get("timestampUs")
+        record.timestamp_ms = unified.get("timestamp")
+        record.parsed_json = parsed
+        record.unified_json = unified
+        record.save(
+            update_fields=[
+                "uid",
+                "session_id",
+                "source",
+                "record_type",
+                "tag_id",
+                "cycle",
+                "timestamp_us",
+                "timestamp_ms",
+                "parsed_json",
+                "unified_json",
+            ]
+        )
+        save_track_point(record, parsed, unified, current_session_id, binding, anchors)
+        processed.append(record)
+
+    if processed:
+        publish_uwb_records(processed)
+
+    return processed, invalid_count
+
+
+>>>>>>> 9500755 (新增直连数据库)
 def record_to_payload(record: UwbRawRecord) -> Dict[str, Any]:
     data = dict(record.unified_json or {})
     data["id"] = record.id
@@ -1013,6 +1087,66 @@ class UwbFetchIncDataView(APIView):
         )
 
 
+<<<<<<< HEAD
+=======
+class UwbDirectDbFetchIncDataView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        ensure_uwb_table()
+        uid = request.query_params.get("uid") or request.query_params.get("username")
+        try:
+            after_id = int(request.query_params.get("after_id") or 0)
+        except (TypeError, ValueError):
+            after_id = 0
+        try:
+            limit = int(request.query_params.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        limit = max(1, min(limit, 500))
+
+        payload: Dict[str, Any] = {
+            "uid": uid,
+            "username": request.query_params.get("username"),
+            "source": "direct_db",
+            "session_id": request.query_params.get("session_id"),
+        }
+        anchors_text = request.query_params.get("anchors")
+        if anchors_text:
+            try:
+                payload["anchors"] = json.loads(anchors_text)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload["anchors"] = None
+
+        _, invalid_count = process_direct_db_records(after_id, limit, payload)
+
+        qs = UwbRawRecord.objects.filter(id__gt=after_id, unified_json__isnull=False)
+        if uid:
+            qs = qs.filter(uid=str(uid))
+        session_id = normalize_session_id(request.query_params.get("session_id"))
+        if session_id:
+            qs = qs.filter(session_id=session_id)
+
+        if after_id > 0:
+            records = list(qs.order_by("id")[:limit])
+        else:
+            records = list(reversed(list(qs.order_by("-id")[:limit])))
+        last_id = records[-1].id if records else after_id
+        return Response(
+            {
+                "uid": uid,
+                "session_id": session_id,
+                "after_id": after_id,
+                "last_id": last_id,
+                "count": len(records),
+                "processed_invalid_count": invalid_count,
+                "records": [record_to_payload(record) for record in records],
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+>>>>>>> 9500755 (新增直连数据库)
 class UwbLatestView(APIView):
     permission_classes = [IsAuthenticated]
 

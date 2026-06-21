@@ -1,6 +1,19 @@
 from django.urls import path,include
 from . import views
 from .student_bulk import StudentBulkSaveView, StudentBulkGetView
+from .uwb_views import (
+    UwbBindingView,
+    UwbDirectDbFetchIncDataView,
+    UwbFetchIncDataView,
+    UwbIngestView,
+    UwbLatestView,
+    UwbReplayView,
+    UwbReplayWindowView,
+    UwbSessionView,
+    UwbStartView,
+    UwbStopView,
+    UwbStreamView,
+)
 
 from .uwb_views import (
     UwbBindingView,
@@ -80,6 +93,17 @@ urlpatterns = [
     path('api/student_bulk/get/', StudentBulkGetView.as_view(), name='student_bulk_get'),
     path('api/student/score-history/', views.StudentScoreHistoryView.as_view(), name='student_score_history'),  # 2025-12-20 成绩分析：按 username 查询 testrecord 成绩历史
     path('api/student/score-video/', views.StudentBestVideoView.as_view(), name='student_score_video'),        # 2026-01-08 视频下载：按 username + itemid 下载最佳动作视频
+    path('api/uwb/start/', UwbStartView.as_view(), name='uwb_start'),
+    path('api/uwb/stop/', UwbStopView.as_view(), name='uwb_stop'),
+    path('api/uwb/ingest/', UwbIngestView.as_view(), name='uwb_ingest'),
+    path('api/uwb/stream/', UwbStreamView.as_view(), name='uwb_stream'),
+    path('api/uwb/fetch_inc_data/', UwbFetchIncDataView.as_view(), name='uwb_fetch_inc_data'),
+    path('api/uwb/direct_db/fetch_inc_data/', UwbDirectDbFetchIncDataView.as_view(), name='uwb_direct_db_fetch_inc_data'),
+    path('api/uwb/latest/', UwbLatestView.as_view(), name='uwb_latest'),
+    path('api/uwb/bindings/', UwbBindingView.as_view(), name='uwb_bindings'),
+    path('api/uwb/sessions/', UwbSessionView.as_view(), name='uwb_sessions'),
+    path('api/uwb/replay/', UwbReplayView.as_view(), name='uwb_replay'),
+    path('api/uwb/replay/window/', UwbReplayWindowView.as_view(), name='uwb_replay_window'),
 # 2026-01-27 教师端学生管理：单个学生增删改
     path('api/teacher/student-update/', views.TeacherBulkStudentUpdateView.as_view(), name='teacher_student_update'),
     path('api/teacher/student-delete/', views.TeacherBulkStudentDeleteView.as_view(), name='teacher_student_delete'),        # 2026-01-08 视频下载：按 username + itemid 下载最佳动作视频

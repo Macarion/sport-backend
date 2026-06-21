@@ -33,7 +33,11 @@ SECRET_KEY = "django-insecure--2!p2dem7br52s+*)co#ny-t^0_(8r^6*1^2o33*d@lxnbx=om
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,121.196.163.155").split(",")
+    if host.strip()
+]
 
 
 # Application definition
@@ -208,7 +212,7 @@ DATABASES = {
         'USER': 'root',
         'PASSWORD': 'Zhihui123',
         'HOST': '121.196.163.155',
-        'PORT': 3306, 
+        'PORT': 3306,
         'OPTIONS': {
             'charset': 'utf8mb4',  # 设置字符集，与你的 pymysql 配置一致
             'init_command': "SET time_zone='+08:00'",

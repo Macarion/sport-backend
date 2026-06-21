@@ -495,6 +495,10 @@ class UwbTrackPoint(models.Model):
         managed = False
         db_table = 'uwb_track_point'
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9500755 (新增直连数据库)
 # class Users(models.Model):
 #     id = models.AutoField(primary_key=True)  # 显式定义主键字段
 #     username = models.CharField(max_length=30)
