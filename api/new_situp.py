@@ -4,6 +4,52 @@ import mediapipe as mp
 import time
 import os
 import threading
+import contextlib
+
+
+class ReadWriteLock:
+    """
+    读写锁实现：
+    - 支持多个读线程同时获取读锁
+    - 写锁独占，持有写锁时不能有其他读或写线程
+    - 写锁优先，防止写线程饥饿
+    """
+
+    def __init__(self):
+        self._read_ready = threading.Condition(threading.Lock())
+        self._readers = 0
+
+    @contextlib.contextmanager
+    def read_lock(self):
+        """获取读锁，支持多个读线程同时访问"""
+        with self._read_ready:
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._read_ready:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._read_ready.notify_all()
+
+    @contextlib.contextmanager
+    def write_lock(self):
+        """获取写锁，独占访问"""
+        with self._read_ready:
+            while self._readers > 0:
+                self._read_ready.wait()
+            # 标记进入写模式，防止新的读线程进入
+            self._readers = -1
+        try:
+            yield
+        finally:
+            with self._read_ready:
+                self._readers = 0
+                self._read_ready.notify_all()
+
+
+# 全局读写锁实例
+DATA_LOCK = ReadWriteLock()
 import json
 from matplotlib import pyplot as plt
 import numpy as np
@@ -23,6 +69,7 @@ import argparse
 from contextlib import ExitStack
 
 from api.base_sport import BaseSport
+from api.config import CAMERA_INDEX
 
 
 def _write_upload_debug(payload: Dict[str, Any]) -> None:
@@ -55,6 +102,57 @@ def _append_record(record: Dict[str, Any]) -> None:
             json.dumps([record], ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+_MARK_KERNEL = np.ones((5, 5), np.uint8)
+
+def _detect_marker_circle_bgr(frame: np.ndarray) -> Optional[tuple[int, int, int]]:
+    """
+    将 backend/api/mark_cv.py 的标志物识别逻辑封装为函数：
+    - HSV 绿色阈值分割
+    - 形态学开运算去噪
+    - Canny 边缘
+    - HoughCircles 圆检测
+    返回 (x, y, r) 像素坐标与半径；未检测到返回 None。
+    """
+    try:
+        if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
+            return None
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower_red1 = np.array([0, 100, 100])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([170, 100, 100])
+        upper_red2 = np.array([180, 255, 255])
+
+        lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
+        upper_green = np.array([77, 255, 255])  # 设定绿色的阈值上限
+
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
+        # mask = cv2.bitwise_or(mask1, mask2)
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
+        edges = cv2.Canny(opening, 80, 160)
+
+        circles = cv2.HoughCircles(
+            edges,
+            cv2.HOUGH_GRADIENT,
+            1,
+            100,
+            param1=100,
+            param2=10,
+            minRadius=10,
+            maxRadius=100,
+        )
+        if circles is None:
+            return None
+
+        # 选半径最大的圆作为标志物（更稳）
+        # c = max(circles[0], key=lambda v: float(v[2]))
+        c = circles[0][0]  # 或者简单循环里用最后一个
+        return (int(c[0]), int(c[1]), int(c[2]))
+    except Exception:
+        return None
 
 mp_pose = mp.solutions.pose
 filename = time.strftime('%Y-%m-%d %H %M %S', time.localtime())
@@ -135,7 +233,7 @@ def get_minima(values, order=8):
     return min_indices, min_values
 
 def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
-    global position, y2, y1, x2, x1, x01, y01, x02, y02, y001, y002, k0, b, x3
+    global position, y2, y1, x2, x1, x01, y01, x02, y02, y001, y002, k0, k, b, x3
     position = []
     k0, k, b = 0, 0, 0
     x01, y001 = 0, 440
@@ -153,9 +251,27 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
 
     results = pose.process(img_RGB)
 
+    # 标志物检测与关键点替换
+    marker_circle = _detect_marker_circle_bgr(img)
+    marker_replaced = False
+    if marker_circle is not None:
+        mx, my, mr = marker_circle
+        # 绘制标志物圆心和外轮廓（在骨架绘制之前）
+        cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
+        cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
+        # 在标志物旁边添加文字标注
+        cv2.putText(img, "Marker", (mx + mr + 10, my), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        marker_replaced = True
+
     if results.pose_landmarks:
         if_existperson = 1
 
+        # 如果检测到标志物，替换 position[23]（左臀关键点）的坐标
+        if marker_replaced:
+            results.pose_landmarks.landmark[23].x = mx / w
+            results.pose_landmarks.landmark[23].y = my / h
+
+        # 使用替换后的关键点绘制骨骼连线
         mp_drawing.draw_landmarks(img, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
         for i in range(33):
@@ -196,7 +312,7 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
         y1 = int(results.pose_landmarks.landmark[11].y * h)
         x2 = int(results.pose_landmarks.landmark[29].x * w)
         y2 = int(results.pose_landmarks.landmark[29].y * h)
-        frame_id_c.append(frame_id)
+        k = (y2 - y1) / (x2 - x1)
         if testing == 0:
             img = cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
             img = cv2.circle(img, (x3, int(x3*k1+y001)), 5, (255, 0, 0), -1)
@@ -205,7 +321,6 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
             shoulder_y.append(y1)
             heal_x.append(x2)
             heal_y.append(y2)
-        # TODO: 除以0错误
         k0 = (shoulder_y[-1] - heal_y[-1])/(shoulder_x[-1] - heal_x[-1]) if shoulder_x[-1] - heal_x[-1] != 0 else 0
         b = shoulder_y[-1] - k0*shoulder_x[-1]
         y01, y02 = int(k0*x01+b), int(k0*x02+b)
@@ -220,7 +335,7 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
         #     b = shoulder_y[0] - k * shoulder_x[0]
         #     y01, y02 = int(k * x01 + b), int(k * x02 + b)
         #     img = cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
-    return img, if_existperson, start_time, position, k0, y01, k1
+    return img, if_existperson, start_time, position, k0, b, k1, marker_replaced
 
 def update_plot(ax, frame_id, obsY1, num):
     if len(frame_id) == 0 or len(obsY1) == 0:
@@ -381,132 +496,6 @@ def cv2ImgAddText(img, text, left, top, textColor=(0, 255, 0), textSize=10, bord
 datapath1 = mkdir(datapath)
 FILENAME = datapath1 + f'/{filename}-situp.mp4'
 
-def _auth_remote_media_upload_url() -> str:
-    explicit = (os.getenv("AUTH_REMOTE_MEDIA_UPLOAD") or "").strip()
-    if explicit:
-        return explicit
-    base = (os.getenv("AUTH_REMOTE_BASE") or "").strip() or "http://47.99.223.140:8081"
-    return base.rstrip("/") + "/media/upload/"
-
-
-def _collect_score_images(dir_path: Path, *, limit: int = 8) -> List[tuple[int, Path]]:
-    if not dir_path.exists():
-        return []
-
-    candidates: list[tuple[int, Path]] = []
-    for pattern in ("score*.jpg", "score*.jpeg", "score*.png"):
-        for p in dir_path.glob(pattern):
-            stem = p.stem  # score{n}
-            if not stem.lower().startswith("score"):
-                continue
-            idx_part = stem[5:]
-            if not idx_part.isdigit():
-                continue
-            idx = int(idx_part)
-            if 0 <= idx < 8:
-                candidates.append((idx, p))
-
-    candidates.sort(key=lambda x: x[0])
-    return candidates[:limit]
-
-
-def _image_mime(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in {".jpg", ".jpeg"}:
-        return "image/jpeg"
-    if suffix == ".png":
-        return "image/png"
-    return "application/octet-stream"
-
-
-def _upload_situp_video_to_auth_remote(
-    video_path: str,
-    *,
-    userid: int,
-    itemid: int = 0,
-    score0: int,
-    score1: int,
-    testtime: str,
-    score_images: Optional[List[tuple[int, Path]]] = None,
-    extra_params: Optional[Dict[str, Any]] = None,
-    timeout_s: float = 10.0,
-) -> None:
-    video_file = Path(video_path)
-    if not video_file.exists():
-        print(f"Upload skipped, video not found: {video_file}")
-        return
-    if video_file.stat().st_size <= 0:
-        print(f"Upload skipped, empty video: {video_file}")
-        return
-
-    url = _auth_remote_media_upload_url()
-    data: Dict[str, Any] = {
-        "userid": str(userid),
-        "itemid": str(itemid),
-        "score0": str(score0),
-        "score1": str(score1),
-        "testtime": str(testtime),
-    }
-    if extra_params:
-        data.update(extra_params)
-
-    http = requests.Session()
-    http.trust_env = False
-
-    # Debug: 记录上传信息到文件
-    try:
-        _write_upload_debug(
-            {
-                "url": url,
-                "data": {k: str(v) for k, v in data.items()},
-                "video": {
-                    "path": str(video_file.resolve()),
-                    "name": video_file.name,
-                    "size_bytes": int(video_file.stat().st_size),
-                },
-                "images": [
-                    {
-                        "idx": int(idx),
-                        "path": str(Path(img_path).resolve()),
-                        "name": Path(img_path).name,
-                        "size_bytes": int(Path(img_path).stat().st_size) if Path(img_path).exists() else 0,
-                    }
-                    for idx, img_path in (score_images or [])
-                ],
-                "generated_at": datetime.now().isoformat(timespec="seconds"),
-            }
-        )
-    except Exception as debug_e:
-        print(f"Debug write failed: {debug_e}")
-
-    try:
-        with ExitStack() as stack:
-            files: list[tuple[str, tuple[str, Any, str]]] = []
-            f_video = stack.enter_context(video_file.open("rb"))
-            files.append(("video", (video_file.name, f_video, "video/mp4")))
-
-            for idx, img_path in (score_images or []):
-                if not img_path.exists() or img_path.stat().st_size <= 0:
-                    continue
-                f_img = stack.enter_context(img_path.open("rb"))
-                upload_name = f"score{idx}{img_path.suffix.lower()}"
-                files.append(("images", (upload_name, f_img, _image_mime(img_path))))
-
-            resp = http.post(url, data=data, files=files, timeout=timeout_s)
-        if 200 <= resp.status_code < 300:
-            print(f"Uploaded video to auth remote: {url}")
-        else:
-            print(f"Upload failed ({resp.status_code}): {resp.text[:500]}")
-    except Exception as e:
-        print(f"Upload error: {e}")
-
-
-def _safe_int(value: Any) -> Optional[int]:
-    try:
-        return int(str(value).strip())
-    except Exception:
-        return None
-
 
 class SITUP(BaseSport):
     def __init__(self, username: Optional[str] = None):
@@ -530,12 +519,14 @@ class SITUP(BaseSport):
         self.nums = []
         self.timestamps = []
         self.body_ground_angle1, self.list = [], []
+        self.marker_replaced_frames = []  # 记录每帧的 marker_replaced 状态
         
         # 并发处理相关
         self.frame_queue = Queue(maxsize=5)  # 限制队列大小，避免内存溢出
         self.processed_queue = Queue(maxsize=3)  # 处理后的帧队列
         self.io_queue = Queue()  # 文件I/O操作队列
-        self.lock = threading.Lock()  # 保护共享状态的锁
+        self.lock = threading.RLock()  # 保护共享状态的锁（可重入锁，支持同一线程多次获取）
+        self.rw_lock = ReadWriteLock()  # 读写锁，保护共享数据的读写
         self.running = False
         self.stop_event = threading.Event()
         self.last_plot_save_time = 0
@@ -555,8 +546,26 @@ class SITUP(BaseSport):
         s2 = "\'"
         num_old = self.num_all
         self.X1.append('0')
-        frame1, if_existperson, start_time, position, k0, b0, k1 = process_frame(frame, self.frame_id, WIDTH, HEIGHT,
-                                                                                 self.testing, self.IF_START)
+        frame1, if_existperson, start_time, position, k0, b0, k1, marker_replaced = process_frame(frame, self.frame_id, WIDTH, HEIGHT,
+                                                                                self.testing,self.IF_START)
+        # 记录每帧的 marker_replaced 状态
+        marker_replace_enabled = False
+        if if_existperson == 1:
+            self.marker_replaced_frames.append(marker_replaced)
+            # 在环境检测成功之前，判断是否超过90%的帧检测到标志物
+            # 只有超过90%才进行坐标替换
+            if self.env_ifok == 1 and self.if_start == 2 and 1 not in self.IF_START:
+                if len(self.marker_replaced_frames) >= 10:
+                    true_count = sum(self.marker_replaced_frames)
+                    total_count = len(self.marker_replaced_frames)
+                    if true_count / total_count >= 0.9:
+                        marker_replace_enabled = True
+            # 只有在 marker_replace_enabled 为 True 时才替换坐标
+            if marker_replace_enabled:
+                marker_circle = _detect_marker_circle_bgr(frame)
+                if marker_circle is not None:
+                    mx, my, mr = marker_circle
+                    position[23][1], position[23][2] = mx, my
         # 计时
         if self.num >= 0:
             if not hasattr(self, 'start_time'):
@@ -652,6 +661,9 @@ class SITUP(BaseSport):
                 frame2 = cv2ImgAddText(frame2, '请开始测试', 400 * scaler, 50 * scaler, (255, 165, 0), 40,
                                        drawBox=False)
                 self.detectsuccess=True
+                if len(self.marker_replaced_frames) >= 10:
+                    if true_count / total_count >= 0.9:
+                        marker_replace_enabled = True
             elif self.env_ifok == -1 and self.if_start == 0 and 1 not in self.IF_START:
                 frame2 = cv2ImgAddText(frame2, '脚出画框，请重新调整', 25 * scaler, 15 * scaler, (0, 0, 255), 40,
                                        drawBox=False)
@@ -670,15 +682,15 @@ class SITUP(BaseSport):
                 if position[3][2] > 0 and position[3][1] > 0:
                     if position[31][2] <= 480 and position[32][2] <= 480 and position[31][1] <= 640 and position[32][
                         1] <= 640:
-                        if body_ground_angle - abs((math.atan(k1)) / math.pi * 180) <= 10:
+                        # if body_ground_angle - abs((math.atan(k1)) / math.pi * 180) <= 10:
 
-                            self.last.append(self.frame_id)
-                            if self.frame_id >= 20 and len(self.last) >= 10:
-                                self.env_ifok = 1
+                        self.last.append(self.frame_id)
+                        if self.frame_id >= 20 and len(self.last) >= 10:
+                            self.env_ifok = 1
 
-                        else:
-                            self.env_ifok = -3
-                            self.last = []
+                        # else:
+                            # self.env_ifok = -3
+                            # self.last = []
                     else:
                         self.env_ifok = -1
                         self.last = []
@@ -703,7 +715,7 @@ class SITUP(BaseSport):
                 self.wait.append(self.frame_id)
                 self.time_list.append([self.minute, self.second])
                 self.doing.append(self.time_list[0])
-                if (self.minute * 60 + self.second) - (self.doing[0][0] * 60 + self.doing[0][1]) == 10000:
+                if (self.minute * 60 + self.second) - (self.doing[0][0] * 60 + self.doing[0][1]) == 1000000:
                     self.if_start = -1
                 self.IF_START.append(self.if_start)
 
@@ -1040,65 +1052,73 @@ class SITUP(BaseSport):
         finally:
             print("I/O线程结束")
 
-    def start_video_processing(self, if_open, WIDTH, HEIGHT):
+    def start_video_processing(self, if_open, WIDTH, HEIGHT, video_path: Optional[str] = None):
+        """实时/离线统一入口：仿照 tools/situp_video.py 逐帧读取并分析。
+
+        - video_path=None：读取摄像头
+        - video_path!=None：读取指定视频文件
+        - 保存视频：按输入源自身 fps 写出（不再降速 1/3）
+        """
         if if_open == 1:
             cv2.namedWindow('Situp Detection', cv2.WINDOW_NORMAL)
             cv2.resizeWindow('Situp Detection', WIDTH, HEIGHT)
 
-            cap = cv2.VideoCapture(3, cv2.CAP_DSHOW)  # 打开默认摄像头
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-
-            capture_fps = 20.0
-            record_fps = capture_fps * (2 / 3)  # 将保存视频速度降低 1/3
-            out = cv2.VideoWriter(FILENAME, fourcc, record_fps, (WIDTH, HEIGHT))
+            if video_path:
+                cap = cv2.VideoCapture(video_path)
+            else:
+                cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)  # 打开默认摄像头
 
             if not cap.isOpened():
-                print("无法打开摄像头")
+                if video_path:
+                    print(f"无法打开视频: {video_path}")
+                else:
+                    print("无法打开摄像头")
                 return
-            
-            # 启动并发处理
+
+            input_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or WIDTH
+            input_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or HEIGHT
+            fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
+
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(FILENAME, fourcc, fps, (input_w, input_h))
+
+            # 启动后台 I/O 线程（用于写 txt / 图表 / img1）
             self.running = True
             self.stop_event.clear()
-            
-            # 启动后台线程
-            capture_thread = threading.Thread(target=self._frame_capture_thread, args=(cap, WIDTH, HEIGHT), daemon=True)
-            process_thread = threading.Thread(target=self._frame_process_thread, daemon=True)
             io_thread = threading.Thread(target=self._io_thread, daemon=True)
-            
-            capture_thread.start()
-            process_thread.start()
             io_thread.start()
-            
+
             INTERVAL = 0.5  # 秒
             last_exec = time.monotonic() - INTERVAL
-            last_frame_time = time.time()
-            
-            # 主线程负责显示和保存视频
-            while self.running:
-                try:
-                    # 从处理队列获取帧（非阻塞）
+
+            try:
+                while self.running and not self.stop_event.is_set():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    # 逐帧处理
                     try:
-                        frame2, img1, num, num_all, IF_START, list_data = self.processed_queue.get(timeout=0.1)
-                    except Empty:
-                        # 如果队列为空，使用上一帧或跳过
-                        if time.time() - last_frame_time > 0.1:  # 超过100ms没有新帧，显示提示
-                            # 可以显示"处理中..."的提示
-                            pass
+                        frame_data_generator = self.situp_start(frame, input_w, input_h)
+                        frame2, img1, num, num_all, IF_START, list_data = next(frame_data_generator)
+                    except StopIteration:
+                        break
+                    except Exception as e:
+                        print(f"处理帧时出错: {e}")
                         continue
-                    
-                    last_frame_time = time.time()
-                    
-                    # 更新共享状态（从处理结果中获取）
-                    with self.lock:
+
+                    # 写入共享数据（采集线程 - 写锁）
+                    with self.rw_lock.write_lock():
                         self.num = num
                         self.num_all = num_all
                         self.nums.append(num)
                         self.timestamps.append(datetime.now().isoformat(timespec="milliseconds"))
-                    
-                    # 每 0.5 s 执行一次数据记录
+
+                    # 每 0.5s 记录一次 runtime_data.json + 保存 img1
                     now = time.monotonic()
                     if now - last_exec >= INTERVAL:
-                        with self.lock:
+                        # 读取共享数据（分析线程 - 读锁）
+                        with self.rw_lock.read_lock():
                             record = {
                                 "username": self.username,
                                 "nums": self.nums.copy(),
@@ -1106,7 +1126,6 @@ class SITUP(BaseSport):
                                 "num_all": self.num_all,
                                 "timestamps": self.timestamps.copy(),
                                 "angles": self.obsY1.copy() if self.obsY1 else [],
-                                # 检测成功条件：环境通过且处于准备状态，并且尚未进入正式开始信号
                                 "detectsuccess": self.detectsuccess,
                                 "finished": False,
                             }
@@ -1121,8 +1140,8 @@ class SITUP(BaseSport):
                     
                     # 检查退出条件
                     if -1 in IF_START:
-                        # 结束时再落一次盘，带上结束标记
-                        with self.lock:
+                        # 读取共享数据（分析线程 - 读锁）
+                        with self.rw_lock.read_lock():
                             end_record = {
                                 "username": self.username,
                                 "nums": self.nums.copy(),
@@ -1136,71 +1155,23 @@ class SITUP(BaseSport):
                         _append_record(end_record)
                         print("测试结束")
                         break
-                    
+
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                        
-                except Exception as e:
-                    print(f"显示循环错误: {e}")
-                    continue
-            
-            # 停止所有线程
-            self.running = False
-            self.stop_event.set()
-            
-            # 等待线程结束
-            capture_thread.join(timeout=1.0)
-            process_thread.join(timeout=1.0)
-            io_thread.join(timeout=2.0)  # I/O线程可能需要更长时间
-            
-            cap.release()
-            out.release()
-            cv2.destroyAllWindows()
+            finally:
+                self.running = False
+                self.stop_event.set()
+                cap.release()
+                out.release()
+                cv2.destroyAllWindows()
+                io_thread.join(timeout=2.0)
 
-            userid = _safe_int(self.username)
-
-            # Debug: 记录userid转换结果
-            try:
-                _write_upload_debug({
-                    "execution_point": "userid_check",
-                    "username": self.username,
-                    "userid_converted": userid,
-                    "userid_valid": userid is not None,
-                    "scores": {
-                        "num": getattr(self, "num", None),
-                        "num_all": getattr(self, "num_all", None),
-                    },
-                    "timestamp": datetime.now().isoformat(timespec="seconds"),
-                    "will_proceed": userid is not None,
-                })
-            except Exception as debug_e:
-                print(f"Debug write at userid_check failed: {debug_e}")
-
-            if userid is None:
-                print(f"Upload skipped, invalid userid(username): {self.username!r}")
-            else:
-                with self.lock:
-                    score0 = int(getattr(self, "num", 0))
-                    score1 = int(getattr(self, "num_all", 0))
-                    testtime = self.timestamps[-1] if self.timestamps else datetime.now().isoformat(timespec="seconds")
-
-                score_images = _collect_score_images(Path(datapath1))
-                # 异步上传，不阻塞主线程
-                upload_thread = threading.Thread(
-                    target=_upload_situp_video_to_auth_remote,
-                    kwargs={
-                        "video_path": FILENAME,
-                        "userid": userid,
-                        "itemid": 0,
-                        "score0": score0,
-                        "score1": score1,
-                        "testtime": testtime,
-                        "score_images": score_images,
-                    },
-                    daemon=True
-                )
-                upload_thread.start()
-                print("后台正在上传视频...")
+            # 测试完成，打印结果
+            with self.rw_lock.read_lock():
+                score0 = int(getattr(self, "num", 0))
+                score1 = int(getattr(self, "num_all", 0))
+            print(f"测试完成！计数: {score0}, 总数: {score1}")
+            print(f"结果视频已保存: {FILENAME}")
 
         elif if_open == -1:
             save_plot(fr'{datapath1}\body_ground.png', self.X, self.obsY1, self.X1)
@@ -1210,6 +1181,63 @@ class SITUP(BaseSport):
 
         elif if_open == 0:
             pass
+
+    def start_video_file(self, file_path: str, WIDTH=640, HEIGHT=480, save_output: bool = True):
+        """离线视频文件解析：仿照 tools/situp_video.py 的方式读取视频路径并逐帧分析。
+
+        - 输入：file_path 指定视频文件
+        - 输出：默认按输入 fps 保存结果视频到 “原文件名-situp-result.mp4”
+        - 处理：逐帧调用 situp_start，逻辑与实时检测保持一致
+        """
+        if not os.path.exists(file_path):
+            print(f"视频不存在: {file_path}")
+            return
+
+        cap = cv2.VideoCapture(file_path)
+        if not cap.isOpened():
+            print(f"无法打开视频: {file_path}")
+            return
+
+        input_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or WIDTH
+        input_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or HEIGHT
+        fps = cap.get(cv2.CAP_PROP_FPS) or 20.0
+
+        out = None
+        out_path = None
+        if save_output:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out_path = f"{os.path.splitext(file_path)[0]}-situp-result.mp4"
+            out = cv2.VideoWriter(out_path, fourcc, fps, (input_w, input_h))
+
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                # 处理单帧（保持与实时模式一致：不在这里额外翻转输入帧）
+                try:
+                    frame_data_generator = self.situp_start(frame, input_w, input_h)
+                    frame2, img1, num, num_all, IF_START, list_data = next(frame_data_generator)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    print(f"处理帧时出错: {e}")
+                    continue
+
+                if out is not None:
+                    out.write(frame2)
+
+                # 遇到结束标记提前退出
+                if -1 in IF_START:
+                    break
+        finally:
+            cap.release()
+            if out is not None:
+                out.release()
+            cv2.destroyAllWindows()
+            if out_path:
+                print(f"结果已保存: {out_path}")
 
     def start(self):
         self.interval = 0.5  # 秒
@@ -1276,13 +1304,16 @@ class SITUP(BaseSport):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument(
-        "--username",
-        default=os.environ.get("SITUP_USERNAME"),
-        help="当前训练用户名（可选，也可用环境变量 SITUP_USERNAME）",
+        "--video",
+        default=None,
+        help="输入视频路径（可选；传了则分析视频，不传则使用摄像头实时检测）",
     )
     args = parser.parse_args()
 
-    situp_detector = SITUP(username=args.username)
-    situp_detector.start_video_processing(if_open=1, WIDTH=640, HEIGHT=480)
-# situp_detector = SITUP()
-# situp_detector.start_video_processing(if_open=1, WIDTH=640, HEIGHT=480)
+    situp_detector = SITUP()
+    if args.video:
+        # 有视频路径 -> 分析视频文件
+        situp_detector.start_video_processing(if_open=1, WIDTH=640, HEIGHT=480, video_path=args.video)
+    else:
+        # 无视频路径 -> 打开摄像头实时检测
+        situp_detector.start_video_processing(if_open=1, WIDTH=640, HEIGHT=480)
