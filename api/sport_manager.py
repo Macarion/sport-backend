@@ -124,7 +124,7 @@ class SportManager:
                 break
 
             async_to_sync(channel_layer.group_send)(
-                f"data_{self.uid}", {"type": "send_data", "text": json.dumps(result)}
+                f"webrtc_{self.uid}", {"type": "send_data", "text": json.dumps(result)}
             )
 
     def close_ws(self):
@@ -133,13 +133,7 @@ class SportManager:
         该方法会向指定用户组广播关闭事件，通知所有连接断开
         """
         channel_layer = get_channel_layer()  # 获取通道层实例，用于跨进程通信
-        group_name = f"data_{self.uid}"  # 构建组名，基于用户ID，用于将用户分组
-        async_to_sync(channel_layer.group_send)(  # 将异步函数同步调用
-            group_name,  # 目标组名，即特定用户的组
-            {
-                "type": "close_client",  # 对应consumer里的方法
-            },
-        )
+
         group_name = f"webrtc_{self.uid}"  # 构建组名，基于用户ID，用于将用户分组
         async_to_sync(channel_layer.group_send)(  # 将异步函数同步调用
             group_name,  # 目标组名，即特定用户的组
