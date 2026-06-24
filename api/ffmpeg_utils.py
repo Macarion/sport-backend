@@ -1,20 +1,20 @@
 import subprocess
 import threading
+import time
 import numpy as np
 import queue
 import shutil
 
 # 视频参数
 
-class FFmpegVideoHandler:
 
+class FFmpegVideoHandler:
     """
     FFmpegVideoHandler类用于处理视频流，通过FFmpeg进行视频解码和格式转换。
     它使用多线程方式读取FFmpeg处理后的视频帧，并通过队列管理帧数据。
     """
+
     def __init__(self, width, height, fps, channel=3):
-
-
         """
         初始化FFmpegVideoHandler实例
         """
@@ -25,17 +25,17 @@ class FFmpegVideoHandler:
         self.channel = channel
         self.frame_size = width * height * channel
 
-        self.ffmpeg_process = None # 存储FFmpeg进程对象
+        self.ffmpeg_process = None  # 存储FFmpeg进程对象
 
         self.frame_queue = queue.Queue(maxsize=30)  # 创建帧队列，最大容量30
-        self.frame_queue_lock = threading.Lock()  # 帧队列的锁，用于线程同步
 
         self.read_thread = None  # 存储读帧线程对象
 
         self.running = False  # 运行状态标志
 
-    def start(self):
+        self.time = [0] * 10
 
+    def start(self):
         """
         启动FFmpeg处理和读帧线程
         """
@@ -49,7 +49,6 @@ class FFmpegVideoHandler:
         self.read_thread.start()
 
     def stop(self):
-
         """
         停止FFmpeg处理和读帧线程
         """
@@ -77,9 +76,7 @@ class FFmpegVideoHandler:
 
         # 通知消费者退出
         try:
-            self.frame_queue_lock.acquire()
             self.frame_queue.put_nowait(None)
-            self.frame_queue_lock.release()
         except queue.Full:
             pass
 
@@ -88,6 +85,8 @@ class FFmpegVideoHandler:
             return
 
         try:
+            if self.time[0] == 0:
+                self.time[0] = time.time()
             self.ffmpeg_process.stdin.write(video_stream)
             self.ffmpeg_process.stdin.flush()
 
@@ -112,26 +111,36 @@ class FFmpegVideoHandler:
         return subprocess.Popen(
             [
                 ffmpeg_exe,
-
-                "-f", "webm",
-                "-i", "pipe:0",
-
-                "-map", "0:v:0",
-
-                "-vf", f"scale={self.width}:{self.height},fps={self.fps}",
-
-                "-f", "rawvideo",
-                "-pix_fmt", "bgr24",
-
+                "-f",
+                "mp4",
+                "-i",
+                "pipe:0",
+                "-fflags",
+                "nobuffer",
+                "-flags",
+                "low_delay",
+                "-probesize",
+                "32",
+                "-analyzeduration",
+                "0",
+                "-map",
+                "0:v:0",
+                "-threads",
+                "auto",
+                # "-vf", f"scale={self.width}:{self.height},fps={self.fps}",
+                # "-vf", f"scale={self.width}:{self.height}",
+                # "-r", str(self.fps),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "bgr24",
+                # "-pix_fmt", "yuv420p",
                 "pipe:1",
             ],
-
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-
-            stderr=subprocess.DEVNULL,
-
-            bufsize=0
+            stderr=None,  # subprocess.DEVNULL,
+            bufsize=0,
         )
 
     def read_frames(self):
@@ -145,12 +154,14 @@ class FFmpegVideoHandler:
 
             while raw_size < self.frame_size:
 
-                part = self.ffmpeg_process.stdout.read(
-                    self.frame_size - raw_size
-                )
+                part = self.ffmpeg_process.stdout.read(self.frame_size - raw_size)
 
                 if not part:
                     break
+
+                if self.time[1] == 0:
+                    self.time[1] = time.time()
+                    print(self.time)
 
                 raw_parts.append(part)
 
@@ -160,22 +171,16 @@ class FFmpegVideoHandler:
 
             if len(raw) < self.frame_size:
 
-                print(
-                    f"读帧结束，剩余数据大小: {len(raw)} bytes"
-                )
+                print(f"读帧结束，剩余数据大小: {len(raw)} bytes")
 
                 break
 
-            frame = np.frombuffer(
-                raw,
-                dtype=np.uint8
-            ).reshape(
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                 (self.height, self.width, self.channel)
             )
 
             frame_index += 1
 
-            self.frame_queue_lock.acquire()
             # 队列满则丢弃最旧帧
             if self.frame_queue.full():
 
@@ -189,13 +194,159 @@ class FFmpegVideoHandler:
 
             except queue.Full:
                 pass
-            self.frame_queue_lock.release()
 
         print("FFmpeg读帧线程退出")
 
         try:
-            self.frame_queue_lock.acquire()
             self.frame_queue.put_nowait(None)
-            self.frame_queue_lock.release()
         except queue.Full:
             pass
+
+
+class FFmpegVideoEncoder:
+
+    def __init__(self, width, height, fps):
+
+        self.width = width
+        self.height = height
+        self.fps = fps
+
+        self.frame_size = width * height * 3
+
+        self.running = False
+
+        self.ffmpeg_process = None
+
+        self.packet_queue = queue.Queue(maxsize=100)
+
+        self.read_thread = None
+
+    def start(self):
+
+        self.ffmpeg_process = self.start_ffmpeg()
+
+        self.running = True
+
+        self.read_thread = threading.Thread(target=self.read_packets, daemon=True)
+
+        self.read_thread.start()
+
+    def stop(self):
+
+        self.running = False
+
+        if self.ffmpeg_process:
+
+            try:
+                if self.ffmpeg_process.stdin:
+                    self.ffmpeg_process.stdin.close()
+            except:
+                pass
+
+            try:
+                self.ffmpeg_process.terminate()
+            except:
+                pass
+
+            try:
+                self.ffmpeg_process.wait(timeout=3)
+            except:
+                self.ffmpeg_process.kill()
+
+        if self.read_thread:
+            self.read_thread.join(timeout=3)
+
+        try:
+            self.packet_queue.put_nowait(None)
+        except:
+            pass
+
+    def encode_frame(self, frame):
+
+        if not self.ffmpeg_process:
+            return
+
+        try:
+
+            self.ffmpeg_process.stdin.write(frame.tobytes())
+
+        except BrokenPipeError:
+            print("encoder ffmpeg exited")
+
+        except Exception as e:
+            print("encoder write error:", e)
+
+    def read_packets(self):
+
+        while self.running:
+
+            try:
+
+                chunk = self.ffmpeg_process.stdout.read(32768)
+
+                if not chunk:
+                    break
+
+                if self.packet_queue.full():
+
+                    try:
+                        self.packet_queue.get_nowait()
+                    except:
+                        pass
+
+                self.packet_queue.put_nowait(chunk)
+
+            except Exception as e:
+
+                print("encoder read error:", e)
+
+                break
+
+        print("FFmpeg encoder thread exit")
+
+        try:
+            self.packet_queue.put_nowait(None)
+        except:
+            pass
+
+    def start_ffmpeg(self):
+
+        ffmpeg_exe = shutil.which("ffmpeg")
+
+        if ffmpeg_exe is None:
+
+            import imageio_ffmpeg
+
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        return subprocess.Popen(
+            [
+                ffmpeg_exe,
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "bgr24",
+                "-s",
+                f"{self.width}x{self.height}",
+                "-r",
+                str(self.fps),
+                "-i",
+                "pipe:0",
+                "-an",
+                "-c:v",
+                "libvpx",
+                "-deadline",
+                "realtime",
+                "-cpu-used",
+                "8",
+                "-b:v",
+                "1M",
+                "-f",
+                "webm",
+                "pipe:1",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )

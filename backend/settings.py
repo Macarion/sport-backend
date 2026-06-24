@@ -31,7 +31,7 @@ AUTH_USER_MODEL = 'api.Users'  # 格式: 应用名.模型名
 SECRET_KEY = "django-insecure--2!p2dem7br52s+*)co#ny-t^0_(8r^6*1^2o33*d@lxnbx=om"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = [
     host.strip()
@@ -268,18 +268,69 @@ LOGGING = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
+            'level': 'WARNING',
         },
         "auth_file": {
             "class": "logging.FileHandler",
             "filename": os.getenv("AUTH_LOG_FILE", "auth.log"),
             "encoding": "utf-8",
+            'level': 'WARNING',
         },
     },
     "loggers": {
         "api.authentication": {
             "handlers": ["console", "auth_file"],
-            "level": "DEBUG",
+            "level": "WARNING",
             "propagate": False,
         },
+        "daphne": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.request": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "channels": {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        "asyncio": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "matplotlib.font_manager": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "aiortc": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "amqp": {
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "channels_rabbitmq": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "rabbitmq": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        }
     },
 }

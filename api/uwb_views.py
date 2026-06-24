@@ -665,8 +665,6 @@ def save_lines(lines: List[str], payload: Dict[str, Any]) -> tuple[List[UwbRawRe
     return saved_records, invalid
 
 
-<<<<<<< HEAD
-=======
 def process_direct_db_records(after_id: int, limit: int, payload: Dict[str, Any]) -> tuple[List[UwbRawRecord], int]:
     source = str(payload.get("source") or "direct_db")
     base_uid = payload.get("uid")
@@ -738,7 +736,6 @@ def process_direct_db_records(after_id: int, limit: int, payload: Dict[str, Any]
     return processed, invalid_count
 
 
->>>>>>> 9500755 (新增直连数据库)
 def record_to_payload(record: UwbRawRecord) -> Dict[str, Any]:
     data = dict(record.unified_json or {})
     data["id"] = record.id
@@ -1087,8 +1084,6 @@ class UwbFetchIncDataView(APIView):
         )
 
 
-<<<<<<< HEAD
-=======
 class UwbDirectDbFetchIncDataView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1146,7 +1141,6 @@ class UwbDirectDbFetchIncDataView(APIView):
         )
 
 
->>>>>>> 9500755 (新增直连数据库)
 class UwbLatestView(APIView):
     permission_classes = [IsAuthenticated]
 

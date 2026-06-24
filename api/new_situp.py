@@ -312,7 +312,7 @@ def process_frame(img, frame_id, WIDTH, HEIGHT, testing, IF_START):
         y1 = int(results.pose_landmarks.landmark[11].y * h)
         x2 = int(results.pose_landmarks.landmark[29].x * w)
         y2 = int(results.pose_landmarks.landmark[29].y * h)
-        k = (y2 - y1) / (x2 - x1)
+        k = (y2 - y1) / (x2 - x1) if (x2 - x1) != 0 else 0
         if testing == 0:
             img = cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
             img = cv2.circle(img, (x3, int(x3*k1+y001)), 5, (255, 0, 0), -1)
