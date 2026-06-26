@@ -167,7 +167,7 @@ class SitReachSession:
             ARUCO_GAP_CM,
             marker_ids=(0, 1)
         )
-        self.hand_detector = HandDetector()
+        self.hand_detector = HandDetector(max_hands=2, detection_con=0.65, track_con=0.65)
         self.cheat_detector = PoseCheatDetector()
         self.pose_drawer = PoseDrawer()
 
@@ -191,6 +191,8 @@ class SitReachSession:
         self.has_finger = False
         self.finger_px = None
         self.cheat_vis = {}
+        self.last_valid_score = None
+        self.last_valid_finger_px = None
 
         # 前端图像缓存
         self.latest_raw_frame = None
@@ -368,7 +370,9 @@ class SitReachSession:
             self.is_calibrated = self.calibrator.calibrate(draw_frame)
 
             # 手指检测
+            # 手指检测：双手中指融合
             finger_px = self.hand_detector.find_middle_finger(draw_frame)
+
             self.finger_px = finger_px
             self.has_finger = finger_px is not None
 
@@ -379,25 +383,76 @@ class SitReachSession:
                     world = self.calibrator.pixel_to_world(finger_px)
 
                     if world:
+                        world_x = float(world[0])
                         score_cm = float(world[1])
-                        self.score = round(score_cm, 1)
 
-                        if score_cm > self.max_score:
-                            self.max_score = round(score_cm, 1)
+                        # =============================
+                        # 1. 板面范围过滤
+                        # =============================
+                        # 根据你的装置：成绩范围 -20~50cm
+                        # x方向给一个宽松范围，防止误识别到板外
+                        in_y_range = -25 <= score_cm <= 55
+                        in_x_range = -20 <= world_x <= 30
 
-                        fx, fy = int(finger_px[0]), int(finger_px[1])
-                        cv2.circle(
-                            draw_frame,
-                            (fx, fy),
-                            10,
-                            (0, 255, 255),
-                            -1
-                        )
+                        if in_y_range and in_x_range:
 
-                        self.calibrator.draw_augmented_reality(
-                            draw_frame,
-                            finger_world_y=score_cm
-                        )
+                            # =============================
+                            # 2. 成绩跳变过滤
+                            # =============================
+                            if self.last_valid_score is None:
+                                valid_score = True
+                            else:
+                                valid_score = abs(score_cm - self.last_valid_score) <= 8.0
+
+                            if valid_score:
+                                self.score = round(score_cm, 1)
+                                self.last_valid_score = score_cm
+                                self.last_valid_finger_px = finger_px
+
+                                if score_cm > self.max_score:
+                                    self.max_score = round(score_cm, 1)
+
+                                fx, fy = int(finger_px[0]), int(finger_px[1])
+                                cv2.circle(
+                                    draw_frame,
+                                    (fx, fy),
+                                    10,
+                                    (0, 255, 255),
+                                    -1
+                                )
+
+                                self.calibrator.draw_augmented_reality(
+                                    draw_frame,
+                                    finger_world_y=score_cm
+                                )
+
+                            else:
+                                # 当前帧跳变过大，沿用上一帧成绩和点
+                                if self.last_valid_finger_px is not None:
+                                    fx, fy = int(self.last_valid_finger_px[0]), int(self.last_valid_finger_px[1])
+                                    cv2.circle(
+                                        draw_frame,
+                                        (fx, fy),
+                                        10,
+                                        (0, 165, 255),
+                                        -1
+                                    )
+
+                                    self.calibrator.draw_augmented_reality(
+                                        draw_frame,
+                                        finger_world_y=self.last_valid_score
+                                    )
+
+                        else:
+                            cv2.putText(
+                                draw_frame,
+                                "Finger out of board range",
+                                (20, 180),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.8,
+                                (0, 0, 255),
+                                2
+                            )
 
             # 倒计时
             elapsed_time = time.time() - self.measure_start_time
