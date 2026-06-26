@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+import os
 import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _setting(name: str, default):
@@ -17,6 +21,61 @@ def _setting(name: str, default):
     except Exception:
         pass
     return default
+
+
+def _configured_jump_device() -> str:
+    value = _setting("JUMP_DEVICE", None)
+    if value is None or str(value).strip() == "":
+        value = os.environ.get("JUMP_DEVICE", "auto")
+    return str(value).strip().lower()
+
+
+def _cuda_is_available(requested_device: str) -> bool:
+    try:
+        import torch
+    except Exception as exc:
+        logger.warning(
+            "Unable to import torch while resolving JUMP_DEVICE=%s; falling back to cpu. error=%s",
+            requested_device,
+            exc,
+        )
+        return False
+
+    try:
+        if not torch.cuda.is_available():
+            return False
+
+        if requested_device.startswith("cuda:"):
+            _, index_text = requested_device.split(":", 1)
+            if index_text.isdigit() and int(index_text) >= torch.cuda.device_count():
+                return False
+
+        return True
+    except Exception as exc:
+        logger.warning(
+            "Unable to query CUDA while resolving JUMP_DEVICE=%s; falling back to cpu. error=%s",
+            requested_device,
+            exc,
+        )
+        return False
+
+
+def resolve_jump_device() -> str:
+    requested = _configured_jump_device()
+    if requested in ("", "auto"):
+        return "cuda" if _cuda_is_available("auto") else "cpu"
+
+    if requested == "cpu":
+        return "cpu"
+
+    if requested == "cuda" or requested.startswith("cuda:"):
+        if _cuda_is_available(requested):
+            return requested
+        logger.warning("JUMP_DEVICE=%s requested but CUDA is not available; falling back to cpu.", requested)
+        return "cpu"
+
+    logger.warning("Unsupported JUMP_DEVICE=%s; using auto device selection.", requested)
+    return "cuda" if _cuda_is_available("auto") else "cpu"
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -108,7 +167,7 @@ def get_model_bundle():
         yolo_path = YOLO_MODEL_PATH
         sam2_checkpoint = SAM2_CHECKPOINT_PATH
         sam2_config = "configs/sam2.1/sam2.1_hiera_s.yaml"
-        device = _setting("JUMP_DEVICE", "cuda")
+        device = resolve_jump_device()
 
         _model_bundle = load_models_without_keypoint(
             yolo_model_path=yolo_path,

@@ -18,12 +18,14 @@ class FFmpegVideoHandler:
     FFmpegVideoHandler类用于处理视频流，通过FFmpeg进行视频解码和格式转换。
     它使用多线程方式读取FFmpeg处理后的视频帧，并通过队列管理帧数据。
     """
-    def __init__(self):
-
-
+    def __init__(self, width=WIDTH, height=HEIGHT, fps=FPS):
         """
         初始化FFmpegVideoHandler实例
         """
+        self.width = int(width)
+        self.height = int(height)
+        self.fps = int(fps)
+        self.frame_size = self.width * self.height * CHANNEL
         self.ffmpeg_process = None # 存储FFmpeg进程对象
 
         self.frame_queue = queue.Queue(maxsize=30)  # 创建帧队列，最大容量30
@@ -117,7 +119,7 @@ class FFmpegVideoHandler:
 
                 "-map", "0:v:0",
 
-                "-vf", f"scale={WIDTH}:{HEIGHT},fps={FPS}",
+                "-vf", f"scale={self.width}:{self.height},fps={self.fps}",
 
                 "-f", "rawvideo",
                 "-pix_fmt", "bgr24",
@@ -142,10 +144,10 @@ class FFmpegVideoHandler:
             raw_parts = []
             raw_size = 0
 
-            while raw_size < FRAME_SIZE:
+            while raw_size < self.frame_size:
 
                 part = self.ffmpeg_process.stdout.read(
-                    FRAME_SIZE - raw_size
+                    self.frame_size - raw_size
                 )
 
                 if not part:
@@ -157,7 +159,7 @@ class FFmpegVideoHandler:
 
             raw = b"".join(raw_parts)
 
-            if len(raw) < FRAME_SIZE:
+            if len(raw) < self.frame_size:
 
                 print(
                     f"读帧结束，剩余数据大小: {len(raw)} bytes"
@@ -169,7 +171,7 @@ class FFmpegVideoHandler:
                 raw,
                 dtype=np.uint8
             ).reshape(
-                (HEIGHT, WIDTH, CHANNEL)
+                (self.height, self.width, CHANNEL)
             )
 
             frame_index += 1

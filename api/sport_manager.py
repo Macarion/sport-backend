@@ -52,7 +52,10 @@ class SportManager:
 
         self.data_queue = queue.Queue()
 
-        self.ffmpeg_handler = FFmpegVideoHandler()
+        if sport_type == "jump":
+            self.ffmpeg_handler = FFmpegVideoHandler(width=1280, height=720, fps=15)
+        else:
+            self.ffmpeg_handler = FFmpegVideoHandler()
 
     def start(self):
         print("开始测试")
