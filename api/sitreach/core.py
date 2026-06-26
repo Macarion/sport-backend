@@ -26,11 +26,15 @@ import threading
 import numpy as np
 import mediapipe as mp
 
+from datetime import datetime
 from typing import Dict, Optional, Any
 
 from .detectors.measure import PerspectiveCalibrator, HandDetector
 from .detectors.pose_cheat_detector import PoseCheatDetector
+import pyttsx3
 
+import logging
+logging.getLogger("comtypes").setLevel(logging.ERROR)
 
 # =============================
 # 系统参数
@@ -53,6 +57,35 @@ RESULT_FILE = "result.txt"
 _SESSIONS: Dict[str, "SitReachSession"] = {}
 _LOCK = threading.Lock()
 
+class Voice:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.speaking = False
+
+    def speak(self, text):
+        if self.speaking:
+            return
+
+        def _speak():
+            self.speaking = True
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception:
+                pass
+
+            try:
+                engine = pyttsx3.init()
+                engine.setProperty("rate", 150)
+                engine.say(text)
+                engine.runAndWait()
+                engine.stop()
+            except Exception as e:
+                print(f"[VOICE ERROR] {e}")
+            finally:
+                self.speaking = False
+
+        threading.Thread(target=_speak, daemon=True).start()
 
 # =============================
 # 骨架绘制模块
@@ -134,7 +167,7 @@ class SitReachSession:
             ARUCO_GAP_CM,
             marker_ids=(0, 1)
         )
-        self.hand_detector = HandDetector()
+        self.hand_detector = HandDetector(max_hands=2, detection_con=0.65, track_con=0.65)
         self.cheat_detector = PoseCheatDetector()
         self.pose_drawer = PoseDrawer()
 
@@ -158,6 +191,8 @@ class SitReachSession:
         self.has_finger = False
         self.finger_px = None
         self.cheat_vis = {}
+        self.last_valid_score = None
+        self.last_valid_finger_px = None
 
         # 前端图像缓存
         self.latest_raw_frame = None
@@ -192,6 +227,14 @@ class SitReachSession:
         self.raw_writer = None
         self.draw_writer = None
         self.video_fps = 30
+
+        self.voice = Voice()
+        self.has_spoken_start = False
+        self.has_spoken_measure = False
+        self.has_spoken_finish = False
+        self.last_cheat_voice_time = 0
+
+        self.voice.speak("请坐好并双腿伸直，脚掌贴紧挡板，双手向前伸")
 
     # =============================
     # 初始化视频写入器
@@ -232,7 +275,7 @@ class SitReachSession:
         if frame is None:
             return self._make_data(frame_id)
 
-        self._init_video_writer(frame)
+        # self._init_video_writer(frame)
 
         raw_frame = frame.copy()
         draw_frame = frame.copy()
@@ -300,12 +343,19 @@ class SitReachSession:
                 self.stage = "MEASURING"
                 self.measure_start_time = time.time()
 
+                if not self.has_spoken_measure:
+                    self.voice.speak(f"准备完成，开始测量，计时{MEASURE_TIME_LIMIT}秒")
+                    self.has_spoken_measure = True
+
         # =============================
         # 测量阶段
         # =============================
         if self.stage == "MEASURING":
 
             if self.cheat:
+                if time.time() - self.last_cheat_voice_time > 5:
+                    self.voice.speak("请保持双腿伸直")
+                    self.last_cheat_voice_time = time.time()
                 cv2.putText(
                     draw_frame,
                     "Knees not straight",
@@ -320,7 +370,9 @@ class SitReachSession:
             self.is_calibrated = self.calibrator.calibrate(draw_frame)
 
             # 手指检测
+            # 手指检测：双手中指融合
             finger_px = self.hand_detector.find_middle_finger(draw_frame)
+
             self.finger_px = finger_px
             self.has_finger = finger_px is not None
 
@@ -331,25 +383,76 @@ class SitReachSession:
                     world = self.calibrator.pixel_to_world(finger_px)
 
                     if world:
+                        world_x = float(world[0])
                         score_cm = float(world[1])
-                        self.score = round(score_cm, 1)
 
-                        if score_cm > self.max_score:
-                            self.max_score = round(score_cm, 1)
+                        # =============================
+                        # 1. 板面范围过滤
+                        # =============================
+                        # 根据你的装置：成绩范围 -20~50cm
+                        # x方向给一个宽松范围，防止误识别到板外
+                        in_y_range = -25 <= score_cm <= 55
+                        in_x_range = -20 <= world_x <= 30
 
-                        fx, fy = int(finger_px[0]), int(finger_px[1])
-                        cv2.circle(
-                            draw_frame,
-                            (fx, fy),
-                            10,
-                            (0, 255, 255),
-                            -1
-                        )
+                        if in_y_range and in_x_range:
 
-                        self.calibrator.draw_augmented_reality(
-                            draw_frame,
-                            finger_world_y=score_cm
-                        )
+                            # =============================
+                            # 2. 成绩跳变过滤
+                            # =============================
+                            if self.last_valid_score is None:
+                                valid_score = True
+                            else:
+                                valid_score = abs(score_cm - self.last_valid_score) <= 8.0
+
+                            if valid_score:
+                                self.score = round(score_cm, 1)
+                                self.last_valid_score = score_cm
+                                self.last_valid_finger_px = finger_px
+
+                                if score_cm > self.max_score:
+                                    self.max_score = round(score_cm, 1)
+
+                                fx, fy = int(finger_px[0]), int(finger_px[1])
+                                cv2.circle(
+                                    draw_frame,
+                                    (fx, fy),
+                                    10,
+                                    (0, 255, 255),
+                                    -1
+                                )
+
+                                self.calibrator.draw_augmented_reality(
+                                    draw_frame,
+                                    finger_world_y=score_cm
+                                )
+
+                            else:
+                                # 当前帧跳变过大，沿用上一帧成绩和点
+                                if self.last_valid_finger_px is not None:
+                                    fx, fy = int(self.last_valid_finger_px[0]), int(self.last_valid_finger_px[1])
+                                    cv2.circle(
+                                        draw_frame,
+                                        (fx, fy),
+                                        10,
+                                        (0, 165, 255),
+                                        -1
+                                    )
+
+                                    self.calibrator.draw_augmented_reality(
+                                        draw_frame,
+                                        finger_world_y=self.last_valid_score
+                                    )
+
+                        else:
+                            cv2.putText(
+                                draw_frame,
+                                "Finger out of board range",
+                                (20, 180),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.8,
+                                (0, 0, 255),
+                                2
+                            )
 
             # 倒计时
             elapsed_time = time.time() - self.measure_start_time
@@ -434,14 +537,14 @@ class SitReachSession:
         # 保存过程化数据
         self._append_runtime_data(frame_id, remain_time)
 
-        return self._make_data(frame_id), self.latest_draw_frame
+        return self._make_data(frame_id)
 
     # =============================
     # 保存过程数据
     # =============================
 
     def _append_runtime_data(self, frame_id: int, remain_time: int):
-        now = int(round(time.time() * 1000))
+        now = datetime.now().isoformat(timespec="milliseconds")
 
         real_max = self.max_score if self.max_score > -999 else 0.0
 
@@ -482,7 +585,7 @@ class SitReachSession:
             "prepare_required": PREPARE_STABLE_FRAMES,
             "time_limit": MEASURE_TIME_LIMIT,
 
-            "timestamp": int(round(time.time() * 1000)),
+            "timestamp": datetime.now().isoformat(timespec="milliseconds"),
 
             "frame_ids": self.frame_ids,
             "timestamps": self.timestamps,
@@ -542,6 +645,13 @@ class SitReachSession:
             self.final_score = int(result * 1000) / 1000
 
         self._save_result()
+
+        if not self.has_spoken_finish:
+            if self.final_score is None:
+                self.voice.speak("未能检测到有效成绩，请重新测试")
+            else:
+                self.voice.speak(f"测试完成，您的成绩为 {self.final_score} 厘米")
+            self.has_spoken_finish = True
 
     # =============================
     # 保存最终成绩
@@ -721,7 +831,7 @@ def sitreach_start_local_camera(uid, camera_id=0):
     _CAMERA_STOP_FLAGS[uid] = stop_flag
 
     def _camera_loop():
-        cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(camera_id)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
