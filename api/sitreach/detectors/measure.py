@@ -12,7 +12,7 @@ from typing import Optional, Tuple, List
 # 1. 手部检测模块 (封装 MediaPipe，专门针对中指)
 # =============================================================================
 class HandDetector:
-    def __init__(self, static_mode=False, max_hands=1, detection_con=0.5, track_con=0.5):
+    def __init__(self, static_mode=False, max_hands=2, detection_con=0.65, track_con=0.65):
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(
             static_image_mode=static_mode,
@@ -26,41 +26,40 @@ class HandDetector:
         self.prev_pos = None
         self.alpha = 0.6  # 平滑系数 (0~1)，越大越灵敏，越小越平滑
 
-    def find_middle_finger(self, image: np.ndarray) -> Optional[Tuple[float, float]]:
+    def find_middle_finger(self, image: np.ndarray):
         """
-        检测手部并返回中指指尖的像素坐标 (x, y)。
-        优先返回右手，如果没有则返回左手。
+        检测双手中指指尖。
+        如果检测到两只手，返回两个中指的平均点；
+        如果只检测到一只手，返回这一只手的中指点。
         """
         img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = self.hands.process(img_rgb)
 
-        finger_pos = None
+        points = []
 
         if results.multi_hand_landmarks:
-            # 默认取第一只检测到的手
-            # 实际应用中可以根据 handedness 判断左右手
-            hand_landmarks = results.multi_hand_landmarks[0]
-
-            # 获取中指指尖 (Landmark ID 12)
-            # 索引参考: https://developers.google.com/mediapipe/solutions/vision/hand_landmarker
-            lm = hand_landmarks.landmark[self.mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
-
             h, w, c = image.shape
-            cx, cy = int(lm.x * w), int(lm.y * h)
-            finger_pos = np.array([cx, cy], dtype=np.float32)
 
-            # 可视化骨架（可选）
-            # self.mp_draw.draw_landmarks(image, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
+            for hand_landmarks in results.multi_hand_landmarks:
+                lm = hand_landmarks.landmark[self.mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
+                cx, cy = float(lm.x * w), float(lm.y * h)
+                points.append(np.array([cx, cy], dtype=np.float32))
 
-        # 简单的一阶滞后滤波 (EMA) 平滑坐标
-        if finger_pos is not None:
-            if self.prev_pos is None:
-                self.prev_pos = finger_pos
-            else:
-                self.prev_pos = self.prev_pos * (1 - self.alpha) + finger_pos * self.alpha
-            return tuple(self.prev_pos)
+        if not points:
+            return None
 
-        return None
+        if len(points) == 1:
+            finger_pos = points[0]
+        else:
+            finger_pos = (points[0] + points[1]) / 2.0
+
+        # EMA 平滑
+        if self.prev_pos is None:
+            self.prev_pos = finger_pos
+        else:
+            self.prev_pos = self.prev_pos * (1 - self.alpha) + finger_pos * self.alpha
+
+        return tuple(self.prev_pos)
 
 
 # =============================================================================
