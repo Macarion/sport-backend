@@ -125,7 +125,7 @@ def _detect_marker_circle_bgr(frame: np.ndarray) -> Optional[tuple[int, int, int
         upper_red2 = np.array([180, 255, 255])
 
         lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
-        upper_green = np.array([77, 255, 255])  # 设定绿色的阈值上限
+        upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
 
         mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
         mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
