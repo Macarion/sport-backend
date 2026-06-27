@@ -120,6 +120,7 @@ AUTH_REMOTE_TIMEOUT = 3  # 秒，增加超时时间
 AUTH_CACHE_TTL = 120  # 秒，短缓存，正负结果都会缓存，远端短暂不可用时降低误踢
 # 设为 False 可在开发环境关闭远端内省，仅本地验证 JWT
 AUTH_REMOTE_ENABLED = False  # 启用远端验证
+JUMP_DEVICE = os.getenv("JUMP_DEVICE", "auto")
 
 
 MIDDLEWARE = [
