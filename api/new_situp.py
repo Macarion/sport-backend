@@ -577,7 +577,7 @@ class SITUP(BaseSport):
         # 存运动数据 - 改为异步I/O
         self.io_queue.put(('save_position', self.frame_id, position))
 
-        frame2 = cv2.flip(frame1, 1)
+        frame2 = frame1.copy()
 
         if if_existperson == 0:
             frame2 = cv2.line(frame2, (x01, y002), (x02, y001), (0, 255, 0), 3)

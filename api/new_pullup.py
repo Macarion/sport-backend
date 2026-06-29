@@ -755,7 +755,7 @@ class PULL(BaseSport):
 
         self.io_queue.put(('save_position', self.frame_id, position.copy()))
 
-        frame2 = cv2.flip(frame1, 1)
+        frame2 = frame1.copy()
         scaler = 1
         # 显示数值时间
         frame2 = cv2ImgAddText(frame2, f'{max(0, self.num)}', 25 * scaler, 60 * scaler, (0, 0, 255), 40, drawBox=False)
