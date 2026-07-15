@@ -16,15 +16,16 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
     log = get_logger(f'Inference.{project_type}')
     log.info(f"进程启动，PID={os.getpid()}")
 
-    try:
-        import tensorflow as tf
-        model_path = PROJECTS[project_type]['model_path']
-        log.info(f"加载模型: {model_path}")
-        model = tf.keras.models.load_model(model_path)
+    worker = None
+
+    if project_type == 'situp':
+        from sport_situp import PointDetectionWorker
+        worker = PointDetectionWorker()
         log.info("模型加载完成")
-    except Exception as e:
-        log.error(f"模型加载失败: {e}")
-        sys.exit(1)
+
+    if worker is None:
+        log.error("未找到对应的项目")
+        return
 
     idle_start = time.time()
 
@@ -34,6 +35,9 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
             idle_start = time.time()
 
             shm_name, user_id, frame_id = task
+            if frame_id < 0:
+                eval_queue.put((None, user_id, None))
+                continue
 
             shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
             if frame is None:
@@ -41,11 +45,11 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
                 shm_pool.release_block(shm_name)
                 continue
 
-            input_data = np.expand_dims(frame.astype(np.float32) / 255.0, axis=0)
-            keypoints = model.predict(input_data)
+            # input_data = np.expand_dims(frame.astype(np.float32) / 255.0, axis=0)
+            result = worker.process(frame_id, frame)
             shm.close()
 
-            eval_queue.put((shm_name, user_id, keypoints.tolist()))
+            eval_queue.put((shm_name, user_id, result))
 
         except queue.Empty:
             elapsed = time.time() - idle_start

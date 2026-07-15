@@ -19,18 +19,20 @@ log = get_logger('Launcher')
 mp.set_start_method('spawn', force=True)
 
 # 模块级状态（BaseManager callable 必须引用模块级对象）
-_result_queue = None
-_send_to_ws_queue = None
-_cmd_queue = None
-_project_queues = {}
+_eval_queue = mp.Queue()
+_result_queue = mp.Queue()
+_cmd_queue = mp.Queue()
+_task_queues = {}
+for proj in PROJECTS.keys():
+    _task_queues[proj] = mp.Queue()
+
+
+def _get_eval_queue():
+    return _eval_queue
 
 
 def _get_result_queue():
     return _result_queue
-
-
-def _get_send_queue():
-    return _send_to_ws_queue
 
 
 def _get_command_queue():
@@ -38,22 +40,19 @@ def _get_command_queue():
 
 
 def _get_task_queue(proj):
-    return _project_queues[proj]
+    return _task_queues[proj]
 
 
-class QueueManager(BaseManager):
-    pass
-
-
-_shm_pool_ref = None
-
+_shm_pool_ref = SharedMemoryPool(namespace=SHM_NAMESPACE)
 
 def _get_shm_pool():
     return _shm_pool_ref
 
+class QueueManager(BaseManager):
+    pass
 
+QueueManager.register('get_eval_queue', callable=_get_eval_queue)
 QueueManager.register('get_result_queue', callable=_get_result_queue)
-QueueManager.register('get_send_queue', callable=_get_send_queue)
 QueueManager.register('get_command_queue', callable=_get_command_queue)
 QueueManager.register('get_task_queue', callable=_get_task_queue)
 QueueManager.register('get_shm_pool', callable=_get_shm_pool)
@@ -61,29 +60,22 @@ QueueManager.register('get_shm_pool', callable=_get_shm_pool)
 
 class Launcher:
     def __init__(self):
-        global _result_queue, _send_to_ws_queue, _cmd_queue, _project_queues, _shm_pool_ref
+        global _shm_pool_ref
 
         self.running = True
         self.processes = {}
         self.user_counts = {}
 
-        _result_queue = mp.Queue()
-        _send_to_ws_queue = mp.Queue()
-        _cmd_queue = mp.Queue()
-
-        self.result_queue = _result_queue
-        self.send_to_ws_queue = _send_to_ws_queue
-        self.cmd_queue = _cmd_queue
-
-        _project_queues = {}
-        for proj in PROJECTS.keys():
-            _project_queues[proj] = mp.Queue()
-        self.project_queues = _project_queues
-
-        self.shm_pool = SharedMemoryPool(namespace=SHM_NAMESPACE)
-        _shm_pool_ref = self.shm_pool
-
         self.start_manager_server()
+
+        self.eval_queue = self.manager.get_result_queue()
+        self.result_queue = self.manager.get_send_queue()
+        self.cmd_queue = self.manager.get_command_queue()
+        self.shm_pool = self.manager.get_shm_pool()
+
+        self.project_queues = {}
+        for proj in PROJECTS.keys():
+            self.project_queues[proj] = self.manager.get_task_queue(proj)
 
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
@@ -124,7 +116,7 @@ class Launcher:
         from evaluation_worker import run_evaluation_worker
         proc = mp.Process(
             target=run_evaluation_worker,
-            args=(self.result_queue, self.send_to_ws_queue, self.shm_pool)
+            args=(self.eval_queue, self.result_queue, self.shm_pool)
         )
         proc.start()
         self.eval_process = proc
@@ -136,7 +128,7 @@ class Launcher:
 
         proc = mp.Process(
             target=run_inference_worker,
-            args=(project_type, task_queue, self.shm_pool, self.result_queue)
+            args=(project_type, task_queue, self.shm_pool, self.eval_queue)
         )
         proc.start()
 

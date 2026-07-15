@@ -2,7 +2,6 @@
 import os
 import numpy as np
 from multiprocessing.managers import BaseManager
-from multiprocessing import shared_memory
 from config import FRAME_WIDTH, FRAME_HEIGHT, FRAME_CHANNELS, FRAME_BYTES, get_logger
 from shared_memory_pool import SharedMemoryPool
 
@@ -34,6 +33,7 @@ def get_manager():
 class VideoConsumer:
     def __init__(self):
         self.manager = None
+        self.cmd_queue = None
         self.task_queue = None
         self.send_queue = None
         self.shm_pool = None
@@ -45,8 +45,8 @@ class VideoConsumer:
         self.project = project
 
         self.manager = get_manager()
-        cmd_queue = self.manager.get_command_queue()
-        cmd_queue.put(('register', self.project, 1))
+        self.cmd_queue = self.manager.get_command_queue()
+        self.cmd_queue.put(('register', self.project, 1))
 
         self.task_queue = self.manager.get_task_queue(self.project)
         self.send_queue = self.manager.get_send_queue()
@@ -89,5 +89,5 @@ class VideoConsumer:
 
     def disconnect(self):
         if self.manager:
-            cmd_queue = self.manager.get_command_queue()
-            cmd_queue.put(('unregister', self.project, -1))
+            self.cmd_queue.put(('unregister', self.project, -1))
+            self.task_queue.put((None, self.user_id, -1))
