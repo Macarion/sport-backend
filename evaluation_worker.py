@@ -2,45 +2,41 @@
 import os
 import sys
 import time
+import queue
 from collections import defaultdict
+from config import FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS, get_logger
+from shared_memory_pool import SharedMemoryPool
 
-def run_evaluation_worker(result_queue, send_to_ws_queue, shm_pool_client):
-    """
-    评测计数进程（单例）。
-    接收来自所有推理进程的关键点数据，进行动作计数，并将结果帧发回 WebSocket。
-    """
-    print(f"[Evaluation] 进程启动，PID={os.getpid()}")
-    
-    # 维护每个用户的状态（用于计数）
+log = get_logger('Evaluation')
+
+SHAPE = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
+
+
+def run_evaluation_worker(result_queue, send_to_ws_queue, shm_pool):
+    log.info(f"进程启动，PID={os.getpid()}")
+
     user_sessions = defaultdict(lambda: {'count': 0, 'last_pose': None})
-    
+
     while True:
         try:
             shm_name, user_id, keypoints_list = result_queue.get(timeout=1)
-            
-            # 从共享内存读取帧（此帧已被推理进程绘制了骨骼点）
-            frame = shm_pool_client.get_array(shm_name)
+
+            shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
             if frame is None:
+                shm_pool.release_block(shm_name)
                 continue
-            
-            # ---------- 执行计数逻辑 ----------
-            # 这里简化：调用你的计数函数
-            # new_count = count_action(user_id, keypoints_list, user_sessions)
-            new_count = 10  # 模拟计数
-            
-            # 在共享内存帧上叠加计数文本（绘制报表）
-            # cv2.putText(frame, f"Count: {new_count}", (10,30), ...)
-            
-            # ---------- 将结果帧和计数数据回传给 WebSocket ----------
-            # 注意：此时 frame 仍然在共享内存中，只需将 shm_name 和计数数据发回
+
+            new_count = 10  # 模拟计数，后续替换为实际计数逻辑
+            shm.close()
+
             send_to_ws_queue.put((shm_name, user_id, {'count': new_count}))
-            
+
         except queue.Empty:
             continue
         except KeyboardInterrupt:
             break
         except Exception as e:
-            print(f"[Evaluation] 错误: {e}")
+            log.error(f"错误: {e}")
             time.sleep(1)
-    
-    print("[Evaluation] 进程退出")
+
+    log.info("进程退出")
