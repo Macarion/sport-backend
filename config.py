@@ -6,7 +6,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent
 
 # ---------- 日志配置 ----------
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
     format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',

@@ -2,11 +2,9 @@ from enum import IntEnum
 import math
 import cv2
 import time
-from multiprocessing import Process
-from multiprocessing.connection import PipeConnection
 
 import numpy as np
-from PIL import ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 from typing import Optional
 
 
@@ -476,10 +474,11 @@ class Evaluator:
             if self.ready_count >= 10:
                 self.state = State.READY
 
+        body_ground_angle2 = body_ground_angle
+        is_new_rise = False
+       
         # ========== 正式测试阶段主逻辑 ==========
         if self.state >= State.READY and self.state < State.FINISHED:
-
-            is_new_rise = False
 
             # ========== 修正躯干夹角body_ground_angle2（分段补偿误差） ==========
             # TODO: 不清楚为什么这么做
@@ -618,9 +617,7 @@ class Evaluator:
             )
 
         return {
-            "frame": img,
             "frame_id": frame_id,
-            "state": self.state,
             "score": self.num,
             "num_all": self.num_all,
             "angle": body_ground_angle2,
@@ -658,6 +655,8 @@ def cv2ImgAddText(
     boxPadding=4,
     boxThickness=2,
 ):
+    if isinstance(img, np.ndarray):  # 判断是否OpenCV图片类型
+        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img)  # 创建一个可以在给定图像上绘图的对象
     try:
         fontStyle = ImageFont.truetype(
@@ -702,4 +701,4 @@ def cv2ImgAddText(
     # 再绘制一次文本以覆盖边框的部分
     draw.text((left, top), text, textColor, font=fontStyle)
 
-    return img
+    return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)  # 转换回OpenCV格式

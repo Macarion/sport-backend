@@ -47,9 +47,6 @@ def run_evaluation_worker(eval_queue, result_queue, shm_pool):
             continue
         except KeyboardInterrupt:
             break
-        except Exception as e:
-            log.error(f"错误: {e}")
-            time.sleep(1)
 
     log.info("进程退出")
 

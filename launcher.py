@@ -3,73 +3,41 @@ import os
 import sys
 import subprocess
 import signal
+import time
 import multiprocessing as mp
-from multiprocessing.managers import BaseManager
 import atexit
 import queue
+from queue_manager import QueueManager
 
 from config import (
     PROJECTS, USERS_PER_PROCESS, MAX_PROCESSES_PER_PROJECT,
     IDLE_TIMEOUT, MANAGER_HOST, MANAGER_PORT, AUTH_KEY, get_logger
 )
-from shared_memory_pool import SharedMemoryPool, SHM_NAMESPACE
 
 log = get_logger('Launcher')
 
 mp.set_start_method('spawn', force=True)
 
-# 模块级状态（BaseManager callable 必须引用模块级对象）
-_eval_queue = mp.Queue()
-_result_queue = mp.Queue()
-_cmd_queue = mp.Queue()
-_task_queues = {}
-for proj in PROJECTS.keys():
-    _task_queues[proj] = mp.Queue()
-
-
-def _get_eval_queue():
-    return _eval_queue
-
-
-def _get_result_queue():
-    return _result_queue
-
-
-def _get_command_queue():
-    return _cmd_queue
-
-
-def _get_task_queue(proj):
-    return _task_queues[proj]
-
-
-_shm_pool_ref = SharedMemoryPool(namespace=SHM_NAMESPACE)
-
-def _get_shm_pool():
-    return _shm_pool_ref
-
-class QueueManager(BaseManager):
-    pass
-
-QueueManager.register('get_eval_queue', callable=_get_eval_queue)
-QueueManager.register('get_result_queue', callable=_get_result_queue)
-QueueManager.register('get_command_queue', callable=_get_command_queue)
-QueueManager.register('get_task_queue', callable=_get_task_queue)
-QueueManager.register('get_shm_pool', callable=_get_shm_pool)
+# def _run_manager_server():
+#     server = QueueManager(address=(MANAGER_HOST, MANAGER_PORT), authkey=AUTH_KEY)
+#     log.info("ManagerServer 启动，等待连接...")
+#     server.get_server().serve_forever()
 
 
 class Launcher:
     def __init__(self):
-        global _shm_pool_ref
-
         self.running = True
         self.processes = {}
         self.user_counts = {}
 
-        self.start_manager_server()
+        # self._start_manager_server_process()
 
-        self.eval_queue = self.manager.get_result_queue()
-        self.result_queue = self.manager.get_send_queue()
+        self.manager = QueueManager(address=(MANAGER_HOST, MANAGER_PORT), authkey=AUTH_KEY)
+        self.manager.start()
+        # self.manager.connect()
+
+        self.eval_queue = self.manager.get_eval_queue()
+        self.result_queue = self.manager.get_result_queue()
         self.cmd_queue = self.manager.get_command_queue()
         self.shm_pool = self.manager.get_shm_pool()
 
@@ -86,10 +54,11 @@ class Launcher:
 
         self.start_evaluation_process()
 
-    def start_manager_server(self):
-        self.manager = QueueManager(address=(MANAGER_HOST, MANAGER_PORT), authkey=AUTH_KEY)
-        self.manager.start()
-        log.info(f"Manager 服务已启动: {MANAGER_HOST}:{MANAGER_PORT}")
+    # def _start_manager_server_process(self):
+    #     self._manager_proc = mp.Process(target=_run_manager_server, daemon=True)
+    #     self._manager_proc.start()
+    #     time.sleep(0.5)
+    #     log.info(f"ManagerServer 进程已启动, PID={self._manager_proc.pid}")
 
     def start_django(self):
         log.info("启动 Django 服务...")
@@ -116,7 +85,8 @@ class Launcher:
         from evaluation_worker import run_evaluation_worker
         proc = mp.Process(
             target=run_evaluation_worker,
-            args=(self.eval_queue, self.result_queue, self.shm_pool)
+            args=(self.eval_queue, self.result_queue, self.shm_pool),
+            daemon=True
         )
         proc.start()
         self.eval_process = proc
@@ -128,7 +98,8 @@ class Launcher:
 
         proc = mp.Process(
             target=run_inference_worker,
-            args=(project_type, task_queue, self.shm_pool, self.eval_queue)
+            args=(project_type, task_queue, self.shm_pool, self.eval_queue),
+            daemon=True
         )
         proc.start()
 
@@ -187,22 +158,21 @@ class Launcher:
             for p in procs:
                 if p.is_alive():
                     p.terminate()
-                    p.join(timeout=2)
+                    p.join(timeout=1)
                     if p.is_alive():
                         p.kill()
 
         if hasattr(self, 'django_proc') and self.django_proc.poll() is None:
             self.django_proc.terminate()
-            self.django_proc.wait(timeout=5)
+            self.django_proc.wait(timeout=2)
 
         if hasattr(self, 'eval_process') and self.eval_process.is_alive():
-            self.eval_process.terminate()
-            self.eval_process.join(timeout=2)
+                self.eval_process.terminate()
+                self.eval_process.join(timeout=1)
 
-        self.shm_pool.cleanup()
-
-        if hasattr(self, 'manager'):
-            self.manager.shutdown()
+        # if hasattr(self, '_manager_proc') and self._manager_proc.is_alive():
+        #         self._manager_proc.terminate()
+        #         self._manager_proc.join(timeout=1)
 
         log.info("清理完成")
 
