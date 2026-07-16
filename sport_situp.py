@@ -44,9 +44,7 @@ def _detect_marker_circle_bgr(frame: np.ndarray) -> Optional[tuple[int, int, int
         if circles is None:
             return None
 
-        # 选半径最大的圆作为标志物（更稳）
-        # c = max(circles[0], key=lambda v: float(v[2]))
-        c = circles[0][0]  # 或者简单循环里用最后一个
+        c = circles[0][0]
         return (int(c[0]), int(c[1]), int(c[2]))
     except Exception:
         return None
@@ -78,7 +76,9 @@ class PointDetectionWorker:
         )
 
     # 循环处理函数
-    def process(self, frame_id, img, drawing=False):
+    def process(self, frame_id, img, config):
+        drawing = config.get("drawing", True)
+
         h = img.shape[0]
         w = img.shape[1]
         points: list[PosePoint] = []
@@ -98,15 +98,15 @@ class PointDetectionWorker:
                 points.append(PosePoint(i, cx, cy, cz))
 
             # ========== 圆形标志物检测 ==========
-            marker_circle = _detect_marker_circle_bgr(
-                img
-            )  # 检测脚底圆形标定物，返回(圆心x,y,半径)
+            marker_circle = _detect_marker_circle_bgr(img)
             if marker_circle is not None:
                 mx, my, mr = marker_circle
 
                 # 替换关键点坐标
                 points[23].x = mx
                 points[23].y = my
+                results.pose_landmarks.landmark[23].x = mx / w
+                results.pose_landmarks.landmark[23].y = my / h
 
             if drawing:
                 if marker_circle is not None:
@@ -114,13 +114,8 @@ class PointDetectionWorker:
                     cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
                     cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
                     cv2.putText(
-                        img,
-                        "Marker",
-                        (mx + mr + 10, my),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        (0, 255, 0),
-                        2,
+                        img, "Marker", (mx + mr + 10, my),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
                     )
 
                 # 绘制全身骨骼连线
@@ -133,31 +128,31 @@ class PointDetectionWorker:
                 for p in points:
                     # 按关键点分组填充不同颜色圆点
                     if p.idx == 0:
-                        img = cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
                     elif p.idx in [11, 12]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)
                     elif p.idx in [23, 24]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)
                     elif p.idx in [13, 14]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)
                     elif p.idx in [25, 26]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
                     elif p.idx in [15, 16, 27, 28]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)
                     elif p.idx in [17, 19, 21]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
                     elif p.idx in [18, 20, 22]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (16, 144, 247), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (16, 144, 247), -1)
                     elif p.idx in [27, 29, 31]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)
                     elif p.idx in [28, 30, 32]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)
                     elif p.idx in [9, 10]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (205, 235, 255), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (205, 235, 255), -1)
                     elif p.idx in [1, 2, 3, 4, 5, 6, 7, 8]:
-                        img = cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
                     else:
-                        img = cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
+                        cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
 
         return {
             "frame_id": frame_id,
@@ -180,7 +175,6 @@ class Evaluator:
     # 评测算法
 
     def __init__(self):
-
         self.state = State.WAITING
         self.start_time = None
         self.num = 0
@@ -214,11 +208,12 @@ class Evaluator:
         self.env_ifok = 0  # 环境检测状态：0检测中/1合格/-1~-4各类环境异常
         self.env_ok_count = 0  # 环境检测合格帧计数器
         self.ready_count = 0  # 准备动作帧计数器
+        self.arm_force_count = 0
 
     # ==========================
     # 循环处理函数
     # ==========================
-    def process(self, img, data):
+    def process(self, img, data, config):
         frame_id = data["frame_id"]
         points: list[PosePoint] = data["points"]
         has_person = data["has_person"]
@@ -252,8 +247,8 @@ class Evaluator:
 
         # 未正式测试时，绘制绿色预设参考地面线+中点标记
         if self.state == State.WAITING:
-            img = cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
-            img = cv2.circle(img, (x3, int(x3 * k1 + y001)), 5, (255, 0, 0), -1)
+            cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
+            cv2.circle(img, (x3, int(x3 * k1 + y001)), 5, (255, 0, 0), -1)
 
             # 参考线与当前肩脚连线夹角差≥5°且未进入测试，缓存肩、脚踝坐标用于拟合地面线
             if abs(math.degrees(math.atan(k0)) - math.degrees(math.atan(k1))) >= 5:
@@ -272,7 +267,7 @@ class Evaluator:
         # 计算拟合基线在x01/x02两点对应的Y值
         y01, y02 = int(k0 * x01 + b0), int(k0 * x02 + b0)
         # 绘制红色拟合地面基准线
-        img = cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
+        cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
 
         # =================================
         # 左上角时间显示
@@ -286,7 +281,7 @@ class Evaluator:
 
         img = cv2ImgAddText(
             img,
-            f"{max(0, self.num)}",
+            str(max(0, self.num)),
             25 * scaler,
             60 * scaler,
             (0, 0, 255),
@@ -295,7 +290,7 @@ class Evaluator:
         )
         img = cv2ImgAddText(
             img,
-            f"{time_str}",
+            time_str,
             25 * scaler,
             105 * scaler,
             (255, 165, 0),
@@ -553,7 +548,6 @@ class Evaluator:
                 or self.state == State.RISE
                 or self.state == State.WAIT_FLAT
             ):
-
                 if body_ground_angle2 <= self.flat_threshold:
                     self.state = State.FLAT
                     self.is_flat_insufficient = False
@@ -561,7 +555,6 @@ class Evaluator:
 
             # 起身判定逻辑
             if self.state == State.FLAT:
-
                 if body_ground_angle2 >= self.rise_threshold:
                     self.state = State.RISE
                     self.is_rise_insufficient = False

@@ -1,9 +1,6 @@
 # evaluation_worker.py
 import os
-import sys
-import time
 import queue
-from collections import defaultdict
 from config import FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS, get_logger
 from shared_memory_pool import SharedMemoryPool
 
@@ -21,10 +18,13 @@ def run_evaluation_worker(eval_queue, result_queue, shm_pool):
 
     while True:
         try:
-            shm_name, user_id, data = eval_queue.get(timeout=1)
+            shm_name, user_id, data, config = eval_queue.get(timeout=1)
+
+            # 检查用户是否主动结束
             if shm_name is None and data is None:
                 if user_id in user_sessions:
                     del user_sessions[user_id]
+                    result_queue.put((None, user_id, None))
                     continue
 
             shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
@@ -37,7 +37,7 @@ def run_evaluation_worker(eval_queue, result_queue, shm_pool):
                 user_sessions[user_id] = evaluator
             else:
                 evaluator = user_sessions[user_id]
-            result = evaluator.process(frame, data)
+            result = evaluator.process(frame, data, config)
 
             shm.close()
 

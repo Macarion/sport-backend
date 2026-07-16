@@ -3,7 +3,6 @@ import os
 import sys
 import time
 import queue
-import numpy as np
 import multiprocessing as mp
 from config import IDLE_TIMEOUT, PROJECTS, FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS, get_logger
 from shared_memory_pool import SharedMemoryPool
@@ -31,12 +30,12 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
 
     while True:
         try:
-            task = task_queue.get(timeout=IDLE_TIMEOUT)
+            shm_name, user_id, frame_id, config = task_queue.get(timeout=IDLE_TIMEOUT)
             idle_start = time.time()
 
-            shm_name, user_id, frame_id = task
+            # 检查用户是否主动结束
             if frame_id < 0:
-                eval_queue.put((None, user_id, None))
+                eval_queue.put((None, user_id, None, config))
                 continue
 
             shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
@@ -46,10 +45,10 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
                 continue
 
             # input_data = np.expand_dims(frame.astype(np.float32) / 255.0, axis=0)
-            result = worker.process(frame_id, frame)
+            result = worker.process(frame_id, frame, config)
             shm.close()
 
-            eval_queue.put((shm_name, user_id, result))
+            eval_queue.put((shm_name, user_id, result, config))
 
         except queue.Empty:
             elapsed = time.time() - idle_start
