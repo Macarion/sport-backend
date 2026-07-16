@@ -66,7 +66,7 @@ class UserManager:
         }
 
         self._cmd_queue.put(('register', project, 1))
-        log.info(f"用户开始测试: uid={uid}, project={project}")
+        log.info("用户开始测试: uid=%s, project=%s", uid, project)
         return True
 
     def stop_sport_test(self, uid):
@@ -74,9 +74,9 @@ class UserManager:
         if not session:
             return
 
-        session["task_queue"].put((None, uid, -1, session.get("config", {})))
+        session["task_queue"].put((None, uid, -1, session["config"]))
         self._cmd_queue.put(('unregister', session["project"], -1))
-        log.info(f"用户停止测试: uid={uid}")
+        log.info("用户停止测试: uid=%s", uid)
 
     async def register_consumer(self, consumer):
         self._ensure_ipc()
@@ -92,14 +92,23 @@ class UserManager:
     def unregister_consumer(self, uid):
         self._consumers.pop(str(uid), None)
 
-    def push_frame(self, uid, frame_bytes, config=None):
+    def update_config(self, uid, config_data):
+        session = self._sessions.get(uid)
+        if not session:
+            return
+        for key, value in config_data.items():
+            if key != "type":
+                session["config"][key] = value
+        log.info("更新配置: uid=%s, config=%s", uid, session['config'])
+
+    def push_frame(self, uid, frame_bytes):
         session = self._sessions.get(uid)
         if not session:
             return False
 
         shm_name = self._shm_pool.acquire_block(timeout=0.05)
         if shm_name is None:
-            log.warning(f"共享内存池已满，丢弃帧 uid={uid}")
+            log.warning("共享内存池已满，丢弃帧 uid=%s", uid)
             return False
 
         shm, arr = SharedMemoryPool.attach(shm_name, SHAPE)
@@ -109,7 +118,7 @@ class UserManager:
 
         frame_id = session["frame_id"]
         session["frame_id"] += 1
-        session["task_queue"].put((shm_name, uid, frame_id, config or session.get("config", {})))
+        session["task_queue"].put((shm_name, uid, frame_id, session["config"]))
         return True
 
     def _read_and_release_frame(self, shm_name):

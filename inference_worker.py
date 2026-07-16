@@ -13,7 +13,7 @@ SHAPE = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
 def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
     mp.current_process().name = f"Inference-{project_type}"
     log = get_logger(f'Inference.{project_type}')
-    log.info(f"进程启动，PID={os.getpid()}")
+    log.info("进程启动，PID=%d", os.getpid())
 
     worker = None
 
@@ -40,7 +40,7 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
 
             shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
             if frame is None:
-                log.error(f"无法读取共享内存 {shm_name}")
+                log.error("无法读取共享内存 %s", shm_name)
                 shm_pool.release_block(shm_name)
                 continue
 
@@ -53,12 +53,12 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
         except queue.Empty:
             elapsed = time.time() - idle_start
             if elapsed >= IDLE_TIMEOUT:
-                log.info(f"空闲超过 {IDLE_TIMEOUT} 秒，进程自毁")
+                log.info("空闲超过 %d 秒，进程自毁", IDLE_TIMEOUT)
                 break
         except KeyboardInterrupt:
             break
         except Exception as e:
-            log.error(f"推理异常: {e}")
+            log.error("推理异常: %s", e)
             time.sleep(1)
 
     log.info("进程退出")

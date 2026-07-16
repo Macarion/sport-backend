@@ -10,7 +10,7 @@ SHAPE = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
 
 
 def run_evaluation_worker(eval_queue, result_queue, shm_pool):
-    log.info(f"进程启动，PID={os.getpid()}")
+    log.info("进程启动，PID=%d", os.getpid())
 
     from sport_situp import Evaluator
 

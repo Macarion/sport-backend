@@ -104,6 +104,9 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
             icecandidate.sdpMLineIndex = cand.get("sdpMLineIndex")
             await self.pc.addIceCandidate(icecandidate)
 
+        elif data["type"] == "config":
+            user_manager.update_config(self.uid, data)
+
     async def handle_video(self, track):
         loop = asyncio.get_event_loop()
 

@@ -18,23 +18,14 @@ log = get_logger('Launcher')
 
 mp.set_start_method('spawn', force=True)
 
-# def _run_manager_server():
-#     server = QueueManager(address=(MANAGER_HOST, MANAGER_PORT), authkey=AUTH_KEY)
-#     log.info("ManagerServer 启动，等待连接...")
-#     server.get_server().serve_forever()
-
-
 class Launcher:
     def __init__(self):
         self.running = True
         self.processes = {}
         self.user_counts = {}
 
-        # self._start_manager_server_process()
-
         self.manager = QueueManager(address=(MANAGER_HOST, MANAGER_PORT), authkey=AUTH_KEY)
         self.manager.start()
-        # self.manager.connect()
 
         self.eval_queue = self.manager.get_eval_queue()
         self.result_queue = self.manager.get_result_queue()
@@ -54,12 +45,6 @@ class Launcher:
 
         self.start_evaluation_process()
 
-    # def _start_manager_server_process(self):
-    #     self._manager_proc = mp.Process(target=_run_manager_server, daemon=True)
-    #     self._manager_proc.start()
-    #     time.sleep(0.5)
-    #     log.info(f"ManagerServer 进程已启动, PID={self._manager_proc.pid}")
-
     def start_django(self):
         log.info("启动 Django 服务...")
         cmd = [
@@ -78,7 +63,7 @@ class Launcher:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             universal_newlines=True
         )
-        log.info(f"Django PID: {self.django_proc.pid}")
+        log.info("Django PID: %d", self.django_proc.pid)
 
     def start_evaluation_process(self):
         log.info("启动评测进程...")
@@ -90,7 +75,7 @@ class Launcher:
         )
         proc.start()
         self.eval_process = proc
-        log.info(f"评测进程 PID: {proc.pid}")
+        log.info("评测进程 PID: %d", proc.pid)
 
     def spawn_inference_process(self, project_type):
         from inference_worker import run_inference_worker
@@ -106,14 +91,14 @@ class Launcher:
         if project_type not in self.processes:
             self.processes[project_type] = []
         self.processes[project_type].append(proc)
-        log.info(f"创建推理进程: {project_type}, PID={proc.pid}")
+        log.info("创建推理进程: %s, PID=%d", project_type, proc.pid)
         return proc
 
     def handle_command(self, cmd, proj, delta):
         if proj not in self.user_counts:
             return
         self.user_counts[proj] = max(0, self.user_counts[proj] + delta)
-        log.info(f"用户计数更新: {proj} = {self.user_counts[proj]}")
+        log.info("用户计数更新: %s = %d", proj, self.user_counts[proj])
         self._adjust_processes(proj)
 
     def _adjust_processes(self, proj):
@@ -133,7 +118,7 @@ class Launcher:
             if p.is_alive():
                 alive.append(p)
             else:
-                log.info(f"检测到进程退出: {proj} PID={p.pid}")
+                log.info("检测到进程退出: %s PID=%d", proj, p.pid)
         self.processes[proj] = alive
 
     def event_loop(self):
@@ -146,7 +131,7 @@ class Launcher:
                 for proj in PROJECTS.keys():
                     self._adjust_processes(proj)
             except Exception as e:
-                log.error(f"事件循环错误: {e}")
+                log.error("事件循环错误: %s", e)
 
     def cleanup(self):
         if not self.running:
@@ -169,10 +154,6 @@ class Launcher:
         if hasattr(self, 'eval_process') and self.eval_process.is_alive():
                 self.eval_process.terminate()
                 self.eval_process.join(timeout=1)
-
-        # if hasattr(self, '_manager_proc') and self._manager_proc.is_alive():
-        #         self._manager_proc.terminate()
-        #         self._manager_proc.join(timeout=1)
 
         log.info("清理完成")
 

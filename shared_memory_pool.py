@@ -19,7 +19,7 @@ class SharedMemoryPool:
         self.shape = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
 
         pid = namespace or str(os.getpid())
-        log.info(f"正在初始化 {SHM_POOL_SIZE} 个共享内存块 (namespace={pid})...")
+        log.info("正在初始化 %d 个共享内存块 (namespace=%s)...", SHM_POOL_SIZE, pid)
         for i in range(SHM_POOL_SIZE):
             name = f"frame_{pid}_{i}"
             try:
@@ -77,7 +77,7 @@ class SharedMemoryPool:
         for i in range(SHM_POOL_SIZE):
             if self.in_use[i] and self.acquire_times[i] > 0:
                 if now - self.acquire_times[i] > SHM_RECLAIM_TIMEOUT:
-                    log.warning(f"回收超时块: {self.blocks[i]['name']}")
+                    log.warning("回收超时块: %s", self.blocks[i]['name'])
                     self.in_use[i] = False
                     self.acquire_times[i] = 0.0
                     self.blocks[i]['shm'].buf[:FRAME_BYTES] = b'\x00' * FRAME_BYTES
@@ -89,4 +89,4 @@ class SharedMemoryPool:
                 block['shm'].close()
                 block['shm'].unlink()
             except Exception as e:
-                log.error(f"清理 {block['name']} 时出错: {e}")
+                log.error("清理 %s 时出错: %s", block['name'], e)

@@ -217,9 +217,12 @@ class Evaluator:
         frame_id = data["frame_id"]
         points: list[PosePoint] = data["points"]
         has_person = data["has_person"]
+        drawing = config.get("drawing", True)
 
         if not has_person:
             return
+
+        hints = []
 
         h = img.shape[0]
         w = img.shape[1]
@@ -247,8 +250,9 @@ class Evaluator:
 
         # 未正式测试时，绘制绿色预设参考地面线+中点标记
         if self.state == State.WAITING:
-            cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
-            cv2.circle(img, (x3, int(x3 * k1 + y001)), 5, (255, 0, 0), -1)
+            if drawing:
+                cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
+                cv2.circle(img, (x3, int(x3 * k1 + y001)), 5, (255, 0, 0), -1)
 
             # 参考线与当前肩脚连线夹角差≥5°且未进入测试，缓存肩、脚踝坐标用于拟合地面线
             if abs(math.degrees(math.atan(k0)) - math.degrees(math.atan(k1))) >= 5:
@@ -266,8 +270,10 @@ class Evaluator:
         b0 = shoulder_y - k0 * shoulder_x
         # 计算拟合基线在x01/x02两点对应的Y值
         y01, y02 = int(k0 * x01 + b0), int(k0 * x02 + b0)
-        # 绘制红色拟合地面基准线
-        cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
+        
+        if drawing:
+            # 绘制红色拟合地面基准线
+            cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
 
         # =================================
         # 左上角时间显示
@@ -279,24 +285,9 @@ class Evaluator:
         minute, second = total_time // 60, total_time % 60
         time_str = f"{minute}\"{second}'"
 
-        img = cv2ImgAddText(
-            img,
-            str(max(0, self.num)),
-            25 * scaler,
-            60 * scaler,
-            (0, 0, 255),
-            40,
-            drawBox=False,
-        )
-        img = cv2ImgAddText(
-            img,
-            time_str,
-            25 * scaler,
-            105 * scaler,
-            (255, 165, 0),
-            40,
-            drawBox=False,
-        )
+        if drawing:
+            img = cv2ImgAddText(img, str(max(0, self.num)), 25, 60, (0, 0, 255))
+            img = cv2ImgAddText(img, time_str, 25, 105, (255, 165, 0))
 
         # =================================
         # 计算关键部位角度
@@ -379,83 +370,33 @@ class Evaluator:
         # ========== 环境状态文字提示分支（env_ifok区分环境异常） ==========
         if self.state == State.WAITING:
             if self.env_ifok == 0:
-                img = cv2ImgAddText(
-                    img,
-                    "测试环境检测中",
-                    25 * scaler,
-                    15 * scaler,
-                    (0, 0, 255),
-                    40,
-                    drawBox=False,
-                )
-                img = cv2ImgAddText(
-                    img,
-                    "请准备",
-                    400 * scaler,
-                    50 * scaler,
-                    (255, 165, 0),
-                    40,
-                    drawBox=False,
-                )
+                hints.append("测试环境检测中")
+                hints.append("请准备")
+                if drawing:
+                    img = cv2ImgAddText(img, "测试环境检测中", 25, 15, (0, 0, 255))
+                    img = cv2ImgAddText(img, "请准备", 400, 50, (255, 165, 0))
             elif self.env_ifok == -1:
-                img = cv2ImgAddText(
-                    img,
-                    "脚出画框，请重新调整",
-                    25 * scaler,
-                    15 * scaler,
-                    (0, 0, 255),
-                    40,
-                    drawBox=False,
-                )
+                hints.append("脚出画框，请重新调整")
+                if drawing:
+                    img = cv2ImgAddText(img, "脚出画框，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -2:
-                img = cv2ImgAddText(
-                    img,
-                    "头部出画框，请重新调整",
-                    25 * scaler,
-                    15 * scaler,
-                    (0, 0, 255),
-                    40,
-                    drawBox=False,
-                )
+                hints.append("头部出画框，请重新调整")
+                if drawing:
+                    img = cv2ImgAddText(img, "头部出画框，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -3:
-                img = cv2ImgAddText(
-                    img,
-                    "斜度大于15°，请重新调整",
-                    25 * scaler,
-                    15 * scaler,
-                    (0, 0, 255),
-                    40,
-                    drawBox=False,
-                )
+                hints.append("斜度大于15°，请重新调整")
+                if drawing:
+                    img = cv2ImgAddText(img, "斜度大于15°，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -4:
-                img = cv2ImgAddText(
-                    img,
-                    "请调整躯干低于中心线",
-                    25 * scaler,
-                    15 * scaler,
-                    (0, 0, 255),
-                    40,
-                    drawBox=False,
-                )
+                hints.append("请调整躯干低于中心线")
+                if drawing:
+                    img = cv2ImgAddText(img, "请调整躯干低于中心线", 25, 15, (0, 0, 255))
         elif self.state == State.READY:
-            img = cv2ImgAddText(
-                img,
-                "检测成功！",
-                25 * scaler,
-                15 * scaler,
-                (0, 0, 255),
-                40,
-                drawBox=False,
-            )
-            img = cv2ImgAddText(
-                img,
-                "请开始测试",
-                400 * scaler,
-                50 * scaler,
-                (255, 165, 0),
-                40,
-                drawBox=False,
-            )
+            hints.append("检测成功！")
+            hints.append("请开始测试")
+            if drawing:
+                img = cv2ImgAddText(img, "检测成功！", 25, 15, (0, 0, 255))
+                img = cv2ImgAddText(img, "请开始测试", 400, 50, (255, 165, 0))
 
         # ========== 判定是否进入预备阶段 ==========
         # 躯干脚底夹角差值<=10，环境合格，累计预备帧
@@ -579,41 +520,43 @@ class Evaluator:
             if is_new_rise:
                 self.num += 1
 
-            # ========== 作弊状态显示 ==========
+            # ========== 作弊状态提示 ==========
             if self.is_arm_force_cheat:
-                img = cv2ImgAddText(
-                    img, "手臂打开借力", 25 * scaler, 350 * scaler, (255, 0, 255), 40
-                )
+                hints.append("手臂打开借力")
             if self.is_out_of_bounds:
-                img = cv2ImgAddText(
-                    img, "测试者出画面", 25 * scaler, 375 * scaler, (255, 0, 255), 40
-                )
+                hints.append("测试者出画面")
             if self.is_flat_insufficient:
-                img = cv2ImgAddText(
-                    img, "肩背未着地", 25 * scaler, 400 * scaler, (255, 0, 255), 40
-                )
+                hints.append("肩背未着地")
             if self.is_rise_insufficient:
-                img = cv2ImgAddText(
-                    img, "起身角度不足", 25 * scaler, 400 * scaler, (255, 0, 255), 40
-                )
+                hints.append("起身角度不足")
+
+            # ========== 作弊状态绘制 ==========
+            if drawing:
+                hint_y = 350
+                if self.is_arm_force_cheat:
+                    img = cv2ImgAddText(img, "手臂打开借力", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if self.is_out_of_bounds:
+                    img = cv2ImgAddText(img, "测试者出画面", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if self.is_flat_insufficient:
+                    img = cv2ImgAddText(img, "肩背未着地", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if self.is_rise_insufficient:
+                    img = cv2ImgAddText(img, "起身角度不足", 25, hint_y, (255, 0, 255))
 
         # ========== 结束阶段主逻辑 ==========
         if self.state == State.FINISHED:
-            img = cv2ImgAddText(
-                img,
-                "测试结束！",
-                25 * scaler,
-                50 * scaler,
-                (0, 0, 255),
-                40,
-                drawBox=False,
-            )
+            hints.append("测试结束！")
+            if drawing:
+                img = cv2ImgAddText(img, "测试结束！", 25, 50, (0, 0, 255))
 
         return {
             "frame_id": frame_id,
             "score": self.num,
             "num_all": self.num_all,
             "angle": body_ground_angle2,
+            "hints": hints,
             "is_new_rise": is_new_rise,
             "is_arm_force_cheat": self.is_arm_force_cheat,
             "is_out_of_bounds": self.is_out_of_bounds,
@@ -640,17 +583,14 @@ def cv2ImgAddText(
     left,
     top,
     textColor=(0, 255, 0),
-    textSize=10,
+    textSize=40,
     borderColor=(0, 0, 0),
     borderWidth=2,
-    drawBox=True,
-    boxColor=(255, 0, 0),
-    boxPadding=4,
-    boxThickness=2,
+    drawBox=False,
 ):
-    if isinstance(img, np.ndarray):  # 判断是否OpenCV图片类型
-        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(img)  # 创建一个可以在给定图像上绘图的对象
+    img_copy = img.copy()
+    pil_img = Image.fromarray(cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
     try:
         fontStyle = ImageFont.truetype(
             "simsun.ttc", textSize, encoding="utf-8", index=1
@@ -667,6 +607,9 @@ def cv2ImgAddText(
 
     # 可选绘制矩形框
     if drawBox:
+        boxPadding = 4
+        boxThickness = 2
+        boxColor = (255, 0, 0)
         box_left = left - boxPadding
         box_top = top - boxPadding
         box_right = left + text_width + boxPadding
@@ -694,4 +637,5 @@ def cv2ImgAddText(
     # 再绘制一次文本以覆盖边框的部分
     draw.text((left, top), text, textColor, font=fontStyle)
 
-    return cv2.cvtColor(np.asarray(img), cv2.COLOR_RGB2BGR)  # 转换回OpenCV格式
+    np.copyto(img, cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR))
+    return img

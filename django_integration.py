@@ -58,7 +58,7 @@ class VideoConsumer:
 
         shm_name = self.shm_pool.acquire_block(timeout=0.1)
         if shm_name is None:
-            log.warning(f"共享内存池已满，丢弃帧 user={self.user_id}")
+            log.warning("共享内存池已满，丢弃帧 user=%s", self.user_id)
             return False
 
         shm, arr = SharedMemoryPool.attach(shm_name, SHAPE)
