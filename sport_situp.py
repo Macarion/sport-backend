@@ -1,53 +1,10 @@
-from enum import IntEnum
 import math
 import cv2
 import time
-
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from enum import IntEnum
 from typing import Optional
-
-
-def _detect_marker_circle_bgr(frame: np.ndarray) -> Optional[tuple[int, int, int]]:
-    """
-    将 backend/api/mark_cv.py 的标志物识别逻辑封装为函数：
-    - HSV 绿色阈值分割
-    - 形态学开运算去噪
-    - Canny 边缘
-    - HoughCircles 圆检测
-    返回 (x, y, r) 像素坐标与半径；未检测到返回 None。
-    """
-    try:
-        if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
-            return None
-
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-        lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
-        upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
-
-        mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
-        _MARK_KERNEL = np.ones((5, 5), np.uint8)
-        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
-        edges = cv2.Canny(opening, 80, 160)
-
-        circles = cv2.HoughCircles(
-            edges,
-            cv2.HOUGH_GRADIENT,
-            1,
-            100,
-            param1=100,
-            param2=30,
-            minRadius=10,
-            maxRadius=100,
-        )
-        if circles is None:
-            return None
-
-        c = circles[0][0]
-        return (int(c[0]), int(c[1]), int(c[2]))
-    except Exception:
-        return None
+from PIL import Image, ImageDraw, ImageFont
 
 
 class PosePoint:
@@ -59,7 +16,7 @@ class PosePoint:
         self.z = z
 
 
-class PointDetectionWorker:
+class Inferencer:
 
     def __init__(self):
         import mediapipe as mp
@@ -74,6 +31,48 @@ class PointDetectionWorker:
             min_tracking_confidence=0.5,
             enable_segmentation=False,
         )
+
+    # 标志物检测函数
+    def _detect_marker_circle_bgr(self, frame: np.ndarray) -> Optional[tuple[int, int, int]]:
+        """
+        将 backend/api/mark_cv.py 的标志物识别逻辑封装为函数：
+        - HSV 绿色阈值分割
+        - 形态学开运算去噪
+        - Canny 边缘
+        - HoughCircles 圆检测
+        返回 (x, y, r) 像素坐标与半径；未检测到返回 None。
+        """
+        try:
+            if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
+                return None
+
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
+            upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
+
+            mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
+            _MARK_KERNEL = np.ones((5, 5), np.uint8)
+            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
+            edges = cv2.Canny(opening, 80, 160)
+
+            circles = cv2.HoughCircles(
+                edges,
+                cv2.HOUGH_GRADIENT,
+                1,
+                100,
+                param1=100,
+                param2=30,
+                minRadius=10,
+                maxRadius=100,
+            )
+            if circles is None:
+                return None
+
+            c = circles[0][0]
+            return (int(c[0]), int(c[1]), int(c[2]))
+        except Exception:
+            return None
 
     # 循环处理函数
     def process(self, frame_id, img, config):
@@ -98,7 +97,7 @@ class PointDetectionWorker:
                 points.append(PosePoint(i, cx, cy, cz))
 
             # ========== 圆形标志物检测 ==========
-            marker_circle = _detect_marker_circle_bgr(img)
+            marker_circle = self._detect_marker_circle_bgr(img)
             if marker_circle is not None:
                 mx, my, mr = marker_circle
 
@@ -199,8 +198,8 @@ class Evaluator:
         self.is_out_of_bounds = False  # 人员替换/替考作弊标记
         self.is_flat_insufficient = False  # 肩背未着地作弊标记
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
-        self.flat_threshold = 30
-        self.rise_threshold = 40
+        self.flat_threshold = 20
+        self.rise_threshold = 50
         self.last_flat_angle = 90
         self.last_rise_angle = 0
 
@@ -209,6 +208,90 @@ class Evaluator:
         self.env_ok_count = 0  # 环境检测合格帧计数器
         self.ready_count = 0  # 准备动作帧计数器
         self.arm_force_count = 0
+    
+    def is_flat(self, angle):
+        return angle <= self.flat_threshold
+    
+    def is_rise(self, angle):
+        return angle >= self.rise_threshold
+    
+    def is_mid(self, angle):
+        return self.flat_threshold < angle < self.rise_threshold
+
+    def calculate_angle(self, x, y):
+        a = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2
+        b = (x[0] - x[2]) ** 2 + (y[0] - y[2]) ** 2
+        c = (x[1] - x[2]) ** 2 + (y[1] - y[2]) ** 2
+        if a == 0 or c == 0:
+            angle = 0
+        else:
+            angle = abs(math.degrees(math.acos((a + c - b) / math.sqrt(4 * a * c))))
+        return angle
+
+
+    def img_put_text(
+        self,
+        img,
+        text,
+        left,
+        top,
+        textColor=(0, 255, 0),
+        textSize=40,
+        borderColor=(0, 0, 0),
+        borderWidth=2,
+        drawBox=False,
+    ):
+        img_copy = img.copy()
+        pil_img = Image.fromarray(cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_img)
+        try:
+            fontStyle = ImageFont.truetype(
+                "simsun.ttc", textSize, encoding="utf-8", index=1
+            )
+        except:
+            fontStyle = ImageFont.load_default()
+
+        bbox = draw.textbbox((left, top), text, font=fontStyle)
+        text_width = bbox[2] - bbox[0]
+
+        # 获取更准确的高度
+        ascent, descent = fontStyle.getmetrics()
+        text_height = ascent + descent
+
+        # 可选绘制矩形框
+        if drawBox:
+            boxPadding = 4
+            boxThickness = 2
+            boxColor = (255, 0, 0)
+            box_left = left - boxPadding
+            box_top = top - boxPadding
+            box_right = left + text_width + boxPadding
+            box_bottom = top + text_height + boxPadding
+            draw.rectangle(
+                [box_left, box_top, box_right, box_bottom],
+                fill=None,
+                outline=boxColor,
+                width=boxThickness,
+            )
+
+        # 绘制边框
+        for x in range(-borderWidth, borderWidth + 1):
+            for y in range(-borderWidth, borderWidth + 1):
+                if x != 0 or y != 0:
+                    draw.text((left + x, top + y), text, borderColor, font=fontStyle)
+
+        # 绘制加粗的文本（通过多次绘制模拟加粗效果）
+        for i in range(1, 3):
+            draw.text((left + i, top), text, textColor, font=fontStyle)
+            draw.text((left - i, top), text, textColor, font=fontStyle)
+            draw.text((left, top + i), text, textColor, font=fontStyle)
+            draw.text((left, top - i), text, textColor, font=fontStyle)
+
+        # 再绘制一次文本以覆盖边框的部分
+        draw.text((left, top), text, textColor, font=fontStyle)
+
+        np.copyto(img, cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR))
+        return img
 
     # ==========================
     # 循环处理函数
@@ -256,18 +339,18 @@ class Evaluator:
 
             # 参考线与当前肩脚连线夹角差≥5°且未进入测试，缓存肩、脚踝坐标用于拟合地面线
             if abs(math.degrees(math.atan(k0)) - math.degrees(math.atan(k1))) >= 5:
-                shoulder_x = x1
-                shoulder_y = y1
-                heal_x = x2
-                heal_y = y2
+                self.shoulder_x = x1
+                self.shoulder_y = y1
+                self.heal_x = x2
+                self.heal_y = y2
 
         # 使用最新一组肩、脚踝点计算拟合地面基线 k0斜率 b截距，避免除零
         k0 = (
-            (shoulder_y - heal_y) / (shoulder_x - heal_x)
-            if shoulder_x - heal_x != 0
+            (self.shoulder_y - self.heal_y) / (self.shoulder_x - self.heal_x)
+            if self.shoulder_x - self.heal_x != 0
             else 0
         )
-        b0 = shoulder_y - k0 * shoulder_x
+        b0 = self.shoulder_y - k0 * self.shoulder_x
         # 计算拟合基线在x01/x02两点对应的Y值
         y01, y02 = int(k0 * x01 + b0), int(k0 * x02 + b0)
         
@@ -286,8 +369,8 @@ class Evaluator:
         time_str = f"{minute}\"{second}'"
 
         if drawing:
-            img = cv2ImgAddText(img, str(max(0, self.num)), 25, 60, (0, 0, 255))
-            img = cv2ImgAddText(img, time_str, 25, 105, (255, 165, 0))
+            img = self.img_put_text(img, str(max(0, self.num)), 25, 60, (0, 0, 255))
+            img = self.img_put_text(img, time_str, 25, 105, (255, 165, 0))
 
         # =================================
         # 计算关键部位角度
@@ -301,7 +384,7 @@ class Evaluator:
         B1.append(float(points[11].y))  # 左肩Y
         B1.append(float(points[23].y))  # 脚底Y
         B1.append(float(points[23].y))
-        body_ground_angle = AngleCalculate(A1, B1)
+        body_ground_angle = self.calculate_angle(A1, B1)
         self.wucha = 8  # 固定角度补偿误差
         self.obsY3.append(body_ground_angle - abs((math.atan(k0)) / math.pi * 180))
 
@@ -313,7 +396,7 @@ class Evaluator:
         B2.append(float(points[16].y))
         B2.append(float(points[14].y))
         B2.append(float(points[12].y))
-        shoulder_elbow_angle = AngleCalculate(A2, B2)
+        shoulder_elbow_angle = self.calculate_angle(A2, B2)
 
         # ========== 计算右手臂肩肘夹角 shoulder_elbow_angle2 ==========
         A6, B6 = [], []
@@ -323,7 +406,7 @@ class Evaluator:
         B6.append(float(points[15].y))
         B6.append(float(points[13].y))
         B6.append(float(points[11].y))
-        shoulder_elbow_angle2 = AngleCalculate(A6, B6)
+        shoulder_elbow_angle2 = self.calculate_angle(A6, B6)
         self.obsY2.append(shoulder_elbow_angle)
         self.obsY4.append(shoulder_elbow_angle2)
 
@@ -335,7 +418,7 @@ class Evaluator:
         B4.append(float(points[23].y))
         B4.append(float(points[29].y))
         B4.append(float(points[29].y))
-        base_angle = AngleCalculate(A4, B4)
+        base_angle = self.calculate_angle(A4, B4)
         self.obsY5.append(body_ground_angle - abs((math.atan(k1)) / math.pi * 180))
 
         # ========== 环境合格判定逻辑：肩、头、脚关键点在地面线下方 ==========
@@ -373,30 +456,30 @@ class Evaluator:
                 hints.append("测试环境检测中")
                 hints.append("请准备")
                 if drawing:
-                    img = cv2ImgAddText(img, "测试环境检测中", 25, 15, (0, 0, 255))
-                    img = cv2ImgAddText(img, "请准备", 400, 50, (255, 165, 0))
+                    img = self.img_put_text(img, "测试环境检测中", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "请准备", 400, 50, (255, 165, 0))
             elif self.env_ifok == -1:
                 hints.append("脚出画框，请重新调整")
                 if drawing:
-                    img = cv2ImgAddText(img, "脚出画框，请重新调整", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "脚出画框，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -2:
                 hints.append("头部出画框，请重新调整")
                 if drawing:
-                    img = cv2ImgAddText(img, "头部出画框，请重新调整", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "头部出画框，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -3:
                 hints.append("斜度大于15°，请重新调整")
                 if drawing:
-                    img = cv2ImgAddText(img, "斜度大于15°，请重新调整", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "斜度大于15°，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -4:
                 hints.append("请调整躯干低于中心线")
                 if drawing:
-                    img = cv2ImgAddText(img, "请调整躯干低于中心线", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "请调整躯干低于中心线", 25, 15, (0, 0, 255))
         elif self.state == State.READY:
             hints.append("检测成功！")
             hints.append("请开始测试")
             if drawing:
-                img = cv2ImgAddText(img, "检测成功！", 25, 15, (0, 0, 255))
-                img = cv2ImgAddText(img, "请开始测试", 400, 50, (255, 165, 0))
+                img = self.img_put_text(img, "检测成功！", 25, 15, (0, 0, 255))
+                img = self.img_put_text(img, "请开始测试", 400, 50, (255, 165, 0))
 
         # ========== 判定是否进入预备阶段 ==========
         # 躯干脚底夹角差值<=10，环境合格，累计预备帧
@@ -419,25 +502,11 @@ class Evaluator:
             # ========== 修正躯干夹角body_ground_angle2（分段补偿误差） ==========
             # TODO: 不清楚为什么这么做
             if body_ground_angle - abs((math.atan(k0)) / math.pi * 180) <= 15:
-                body_ground_angle2 = (
-                    body_ground_angle
-                    - abs((math.atan(k0)) / math.pi * 180)
-                    + self.wucha
-                )
+                body_ground_angle2 = body_ground_angle - abs((math.atan(k0)) / math.pi * 180) + self.wucha
             if 15 < body_ground_angle - abs((math.atan(k0)) / math.pi * 180) <= 30:
-                body_ground_angle2 = (
-                    body_ground_angle
-                    - abs((math.atan(k0)) / math.pi * 180)
-                    + self.wucha
-                    + 10
-                )
+                body_ground_angle2 = body_ground_angle - abs((math.atan(k0)) / math.pi * 180) + self.wucha + 10
             if 30 < body_ground_angle - abs((math.atan(k0)) / math.pi * 180) <= 40:
-                body_ground_angle2 = (
-                    body_ground_angle
-                    - abs((math.atan(k0)) / math.pi * 180)
-                    + self.wucha
-                    + 20
-                )
+                body_ground_angle2 = body_ground_angle - abs((math.atan(k0)) / math.pi * 180) + self.wucha + 20
             if 30 < body_ground_angle - abs((math.atan(k0)) / math.pi * 180):
                 body_ground_angle2 = 60
             if body_ground_angle2 >= 60:
@@ -446,10 +515,11 @@ class Evaluator:
 
             # ========== 各类作弊帧检测，赋值作弊标记 ==========
             # 作弊1：手臂夹角≥150，连续3帧判定手臂大开借力
-            if shoulder_elbow_angle >= 150:
+            if shoulder_elbow_angle >= 120 and body_ground_angle2 > 10:
                 self.arm_force_count += 1
             else:
                 self.arm_force_count = 0
+                self.is_arm_force_cheat = False
 
             if self.arm_force_count >= 3:
                 self.is_arm_force_cheat = True
@@ -471,15 +541,15 @@ class Evaluator:
 
             # 作弊3：波谷角度>30 → 肩背未贴地
             if (
-                self.last_flat_angle > self.flat_threshold
-                and body_ground_angle2 > self.last_flat_angle + 10
+                self.is_rise(body_ground_angle2)
+                and self.is_mid(self.last_flat_angle)
             ):
                 self.is_flat_insufficient = True
 
             # 作弊4：波峰角度<40 → 起身高度不足
             if (
-                self.last_rise_angle < self.rise_threshold
-                and body_ground_angle2 < self.last_rise_angle - 10
+                self.is_flat(body_ground_angle2)
+                and self.is_mid(self.last_rise_angle)
             ):
                 self.is_rise_insufficient = True
 
@@ -489,21 +559,18 @@ class Evaluator:
                 or self.state == State.RISE
                 or self.state == State.WAIT_FLAT
             ):
-                if body_ground_angle2 <= self.flat_threshold:
+                if self.is_flat(body_ground_angle2):
                     self.state = State.FLAT
                     self.is_flat_insufficient = False
                     self.last_rise_angle = 0
 
             # 起身判定逻辑
             if self.state == State.FLAT:
-                if body_ground_angle2 >= self.rise_threshold:
+                if self.is_rise(body_ground_angle2):
                     self.state = State.RISE
                     self.is_rise_insufficient = False
-
-                    if self.last_flat_angle < self.flat_threshold:
-                        is_new_rise = True
-
-                    self.last_flat_angle = 90
+                    self.last_flat_angle = 180
+                    is_new_rise = True
 
             # ========== 有效计数num累加逻辑 ==========
             if is_new_rise:
@@ -534,22 +601,22 @@ class Evaluator:
             if drawing:
                 hint_y = 350
                 if self.is_arm_force_cheat:
-                    img = cv2ImgAddText(img, "手臂打开借力", 25, hint_y, (255, 0, 255))
+                    img = self.img_put_text(img, "手臂打开借力", 25, hint_y, (255, 0, 255))
                     hint_y += 25
                 if self.is_out_of_bounds:
-                    img = cv2ImgAddText(img, "测试者出画面", 25, hint_y, (255, 0, 255))
+                    img = self.img_put_text(img, "测试者出画面", 25, hint_y, (255, 0, 255))
                     hint_y += 25
                 if self.is_flat_insufficient:
-                    img = cv2ImgAddText(img, "肩背未着地", 25, hint_y, (255, 0, 255))
+                    img = self.img_put_text(img, "肩背未着地", 25, hint_y, (255, 0, 255))
                     hint_y += 25
                 if self.is_rise_insufficient:
-                    img = cv2ImgAddText(img, "起身角度不足", 25, hint_y, (255, 0, 255))
+                    img = self.img_put_text(img, "起身角度不足", 25, hint_y, (255, 0, 255))
 
         # ========== 结束阶段主逻辑 ==========
         if self.state == State.FINISHED:
             hints.append("测试结束！")
             if drawing:
-                img = cv2ImgAddText(img, "测试结束！", 25, 50, (0, 0, 255))
+                img = self.img_put_text(img, "测试结束！", 25, 50, (0, 0, 255))
 
         return {
             "frame_id": frame_id,
@@ -565,77 +632,3 @@ class Evaluator:
             "timestamp": int(round(time.time() * 1000)),
         }
 
-
-def AngleCalculate(x, y):
-    a = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2
-    b = (x[0] - x[2]) ** 2 + (y[0] - y[2]) ** 2
-    c = (x[1] - x[2]) ** 2 + (y[1] - y[2]) ** 2
-    if a == 0 or c == 0:
-        angle = 0
-    else:
-        angle = abs(math.degrees(math.acos((a + c - b) / math.sqrt(4 * a * c))))
-    return angle
-
-
-def cv2ImgAddText(
-    img,
-    text,
-    left,
-    top,
-    textColor=(0, 255, 0),
-    textSize=40,
-    borderColor=(0, 0, 0),
-    borderWidth=2,
-    drawBox=False,
-):
-    img_copy = img.copy()
-    pil_img = Image.fromarray(cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB))
-    draw = ImageDraw.Draw(pil_img)
-    try:
-        fontStyle = ImageFont.truetype(
-            "simsun.ttc", textSize, encoding="utf-8", index=1
-        )
-    except:
-        fontStyle = ImageFont.load_default()
-
-    bbox = draw.textbbox((left, top), text, font=fontStyle)
-    text_width = bbox[2] - bbox[0]
-
-    # 获取更准确的高度
-    ascent, descent = fontStyle.getmetrics()
-    text_height = ascent + descent
-
-    # 可选绘制矩形框
-    if drawBox:
-        boxPadding = 4
-        boxThickness = 2
-        boxColor = (255, 0, 0)
-        box_left = left - boxPadding
-        box_top = top - boxPadding
-        box_right = left + text_width + boxPadding
-        box_bottom = top + text_height + boxPadding
-        draw.rectangle(
-            [box_left, box_top, box_right, box_bottom],
-            fill=None,
-            outline=boxColor,
-            width=boxThickness,
-        )
-
-    # 绘制边框
-    for x in range(-borderWidth, borderWidth + 1):
-        for y in range(-borderWidth, borderWidth + 1):
-            if x != 0 or y != 0:
-                draw.text((left + x, top + y), text, borderColor, font=fontStyle)
-
-    # 绘制加粗的文本（通过多次绘制模拟加粗效果）
-    for i in range(1, 3):
-        draw.text((left + i, top), text, textColor, font=fontStyle)
-        draw.text((left - i, top), text, textColor, font=fontStyle)
-        draw.text((left, top + i), text, textColor, font=fontStyle)
-        draw.text((left, top - i), text, textColor, font=fontStyle)
-
-    # 再绘制一次文本以覆盖边框的部分
-    draw.text((left, top), text, textColor, font=fontStyle)
-
-    np.copyto(img, cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR))
-    return img

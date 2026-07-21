@@ -3,7 +3,7 @@ from multiprocessing.managers import BaseManager
 
 from config import get_logger
 
-log = get_logger('Launcher')
+log = get_logger('QueueManager')
 
 # ManagerServer 进程中的延迟初始化对象
 _eval_queue = None

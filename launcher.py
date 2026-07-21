@@ -3,10 +3,10 @@ import os
 import sys
 import subprocess
 import signal
-import time
 import multiprocessing as mp
 import atexit
 import queue
+import traceback
 from queue_manager import QueueManager
 
 from config import (
@@ -130,14 +130,22 @@ class Launcher:
             except queue.Empty:
                 for proj in PROJECTS.keys():
                     self._adjust_processes(proj)
+            except (KeyboardInterrupt, EOFError):
+                break
             except Exception as e:
-                log.error("事件循环错误: %s", e)
+                pass
+        log.info("事件循环结束")
 
     def cleanup(self):
         if not self.running:
             return
         self.running = False
         log.info("正在清理...")
+
+        try:
+            self.cmd_queue.put(('stop', None, None))
+        except Exception:
+            pass
 
         for proj, procs in self.processes.items():
             for p in procs:
@@ -152,14 +160,13 @@ class Launcher:
             self.django_proc.wait(timeout=2)
 
         if hasattr(self, 'eval_process') and self.eval_process.is_alive():
-                self.eval_process.terminate()
-                self.eval_process.join(timeout=1)
+            self.eval_process.terminate()
+            self.eval_process.join(timeout=1)
 
         log.info("清理完成")
 
     def shutdown(self, signum=None, frame=None):
         self.cleanup()
-        sys.exit(0)
 
     def run(self):
         log.info("系统启动中...")

@@ -150,7 +150,7 @@ const start = async () => {
   nums = []
   angles = []
   timestamps = []
-  hints.value = []
+  hints.value = ["连接中..."]
   detectStarted.value = false
 
   // 清除已有定时器
@@ -409,6 +409,7 @@ const initCountChart = () => {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       scales: {
         x: {
           title: {
@@ -418,6 +419,7 @@ const initCountChart = () => {
           ticks: {
             autoSkip: true,
             maxRotation: 0,
+            maxTicksLimit: 8,
           },
         },
         y: {
@@ -425,13 +427,14 @@ const initCountChart = () => {
             display: true,
             text: '个数',
           },
+          beginAtZero: true,
         },
       },
       plugins: {
         tooltip: {
           callbacks: {
             label: function (context) {
-              return `${formatTimestamp(timestamps[context.dataIndex])}: ${context.raw}`
+              return `${formatTimestamp(timestamps[context.dataIndex + Math.max(0, timestamps.length - 100)])}: ${context.raw}`
             },
           },
         },
@@ -464,6 +467,7 @@ const initAngleChart = () => {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       scales: {
         x: {
           title: {
@@ -473,15 +477,19 @@ const initAngleChart = () => {
           ticks: {
             autoSkip: true,
             maxRotation: 0,
+            maxTicksLimit: 8,
           },
         },
-        y: {},
+        y: {
+          beginAtZero: true,
+          suggestedMax: 60,
+        },
       },
       plugins: {
         tooltip: {
           callbacks: {
             label: function (context) {
-              return `${formatTimestamp(timestamps[context.dataIndex])}: ${context.raw}°`
+              return `${formatTimestamp(timestamps[context.dataIndex + Math.max(0, timestamps.length - 100)])}: ${context.raw}°`
             },
           },
         },

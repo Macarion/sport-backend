@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).parent
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
-    format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
+    format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
     datefmt='%H:%M:%S'
 )
 
