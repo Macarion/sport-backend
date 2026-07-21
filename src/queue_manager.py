@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from multiprocessing.managers import BaseManager
 
-from config import get_logger
+from .config import get_logger
 
 log = get_logger('QueueManager')
 
@@ -49,7 +49,7 @@ def _get_shm_pool():
     global _shm_pool_ref
     log.debug('get_shm_pool')
     if _shm_pool_ref is None:
-        from shared_memory_pool import SharedMemoryPool, SHM_NAMESPACE
+        from .shared_memory_pool import SharedMemoryPool, SHM_NAMESPACE
         _shm_pool_ref = SharedMemoryPool(namespace=SHM_NAMESPACE)
     return _shm_pool_ref
 

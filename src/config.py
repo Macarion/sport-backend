@@ -1,12 +1,9 @@
 # config.py
 import os
 import logging
-from pathlib import Path
-
-BASE_DIR = Path(__file__).parent
 
 # ---------- 日志配置 ----------
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'DEBUG')
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
     format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
@@ -17,38 +14,35 @@ logging.basicConfig(
 def get_logger(name):
     return logging.getLogger(name)
 
-# ---------- 项目与模型配置 ----------
+# ---------- 项目配置 ----------
 PROJECTS = {
     'situp': {
-        'model_path': str(BASE_DIR / 'models' / 'situp.h5'),
-        'input_size': (640, 480)
+        'frame_shape': (480, 640, 3)
     },
     'pullup': {
-        'model_path': str(BASE_DIR / 'models' / 'pullup.h5'),
-        'input_size': (640, 480)
+        'frame_shape': (480, 640, 3)
     },
     'sitreach': {
-        'model_path': str(BASE_DIR / 'models' / 'sitreach.h5'),
-        'input_size': (640, 480)
+        'frame_shape': (480, 640, 3)
     },
     'jump': {
-        'model_path': str(BASE_DIR / 'models' / 'jump.h5'),
-        'input_size': (640, 480)
+        'frame_shape': (720, 1280, 3)
     }
 }
 
 # ---------- 动态伸缩参数 ----------
-USERS_PER_PROCESS = 2
+USERS_PER_PROCESS = 1
 MAX_PROCESSES_PER_PROJECT = 4
 IDLE_TIMEOUT = 60
 
 # ---------- 共享内存池配置 ----------
 SHM_POOL_SIZE = 30
 SHM_RECLAIM_TIMEOUT = 10  # 共享内存块超时回收时间（秒）
-FRAME_WIDTH = 640
-FRAME_HEIGHT = 480
-FRAME_CHANNELS = 3
-FRAME_BYTES = FRAME_WIDTH * FRAME_HEIGHT * FRAME_CHANNELS
+
+MAX_FRAME_HEIGHT = max(project['frame_shape'][0] for project in PROJECTS.values())
+MAX_FRAME_WIDTH = max(project['frame_shape'][1] for project in PROJECTS.values())
+MAX_FRAME_CHANNELS = max(project['frame_shape'][2] for project in PROJECTS.values())
+MAX_FRAME_BYTES = MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT * MAX_FRAME_CHANNELS
 
 # ---------- 进程间通信（IPC）配置 ----------
 MANAGER_HOST = '127.0.0.1'

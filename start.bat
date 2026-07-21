@@ -1,1 +1,1 @@
-conda activate sport && python launcher.py
+python main.py

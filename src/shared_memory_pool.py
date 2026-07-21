@@ -1,9 +1,9 @@
 # shared_memory_pool.py
 import os
 import time
-from multiprocessing import shared_memory, Lock
 import numpy as np
-from config import SHM_POOL_SIZE, SHM_RECLAIM_TIMEOUT, FRAME_BYTES, FRAME_WIDTH, FRAME_HEIGHT, FRAME_CHANNELS, get_logger
+from multiprocessing import shared_memory, Lock
+from .config import SHM_POOL_SIZE, SHM_RECLAIM_TIMEOUT, MAX_FRAME_BYTES, MAX_FRAME_WIDTH, MAX_FRAME_HEIGHT, MAX_FRAME_CHANNELS, get_logger
 
 log = get_logger('SHM')
 
@@ -16,25 +16,25 @@ class SharedMemoryPool:
         self.blocks = []
         self.in_use = [False] * SHM_POOL_SIZE
         self.acquire_times = [0.0] * SHM_POOL_SIZE
-        self.shape = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
+        self.shape = (MAX_FRAME_HEIGHT, MAX_FRAME_WIDTH, MAX_FRAME_CHANNELS)
 
         pid = namespace or str(os.getpid())
         log.info("正在初始化 %d 个共享内存块 (namespace=%s)...", SHM_POOL_SIZE, pid)
         for i in range(SHM_POOL_SIZE):
             name = f"frame_{pid}_{i}"
             try:
-                shm = shared_memory.SharedMemory(name=name, create=True, size=FRAME_BYTES)
+                shm = shared_memory.SharedMemory(name=name, create=True, size=MAX_FRAME_BYTES)
             except FileExistsError:
                 shm = shared_memory.SharedMemory(name=name, create=False)
                 shm.close()
                 shm.unlink()
-                shm = shared_memory.SharedMemory(name=name, create=True, size=FRAME_BYTES)
+                shm = shared_memory.SharedMemory(name=name, create=True, size=MAX_FRAME_BYTES)
 
-            shm.buf[:FRAME_BYTES] = b'\x00' * FRAME_BYTES
+            shm.buf[:MAX_FRAME_BYTES] = b'\x00' * MAX_FRAME_BYTES
             self.blocks.append({
                 'name': name,
                 'shm': shm,
-                'size': FRAME_BYTES
+                'size': MAX_FRAME_BYTES
             })
         log.info("初始化完成")
 
@@ -80,7 +80,7 @@ class SharedMemoryPool:
                     log.warning("回收超时块: %s", self.blocks[i]['name'])
                     self.in_use[i] = False
                     self.acquire_times[i] = 0.0
-                    self.blocks[i]['shm'].buf[:FRAME_BYTES] = b'\x00' * FRAME_BYTES
+                    self.blocks[i]['shm'].buf[:MAX_FRAME_BYTES] = b'\x00' * MAX_FRAME_BYTES
 
     def cleanup(self):
         log.info("正在清理共享内存...")

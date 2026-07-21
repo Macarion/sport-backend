@@ -1,15 +1,14 @@
 # launcher.py
 import os
 import sys
-import subprocess
-import signal
-import multiprocessing as mp
-import atexit
 import queue
-import traceback
-from queue_manager import QueueManager
+import signal
+import atexit
+import subprocess
+import multiprocessing as mp
+from .queue_manager import QueueManager
 
-from config import (
+from .config import (
     PROJECTS, USERS_PER_PROCESS, MAX_PROCESSES_PER_PROJECT,
     IDLE_TIMEOUT, MANAGER_HOST, MANAGER_PORT, AUTH_KEY, get_logger
 )
@@ -43,14 +42,17 @@ class Launcher:
         for proj in PROJECTS.keys():
             self.user_counts[proj] = 0
 
+        self.start_django()
+
         self.start_evaluation_process()
 
     def start_django(self):
+        from pathlib import Path
+
         log.info("启动 Django 服务...")
         cmd = [
             sys.executable, "-m", "daphne",
             "-p", "8090",
-            "-b", "0.0.0.0",
             "backend.asgi:application"
         ]
         env = os.environ.copy()
@@ -60,14 +62,15 @@ class Launcher:
 
         self.django_proc = subprocess.Popen(
             cmd, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cwd=Path(__file__).parent / "web_server",
+            # stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
             universal_newlines=True
         )
         log.info("Django PID: %d", self.django_proc.pid)
 
     def start_evaluation_process(self):
         log.info("启动评测进程...")
-        from evaluation_worker import run_evaluation_worker
+        from .evaluation_worker import run_evaluation_worker
         proc = mp.Process(
             target=run_evaluation_worker,
             args=(self.eval_queue, self.result_queue, self.shm_pool),
@@ -78,7 +81,7 @@ class Launcher:
         log.info("评测进程 PID: %d", proc.pid)
 
     def spawn_inference_process(self, project_type):
-        from inference_worker import run_inference_worker
+        from .inference_worker import run_inference_worker
         task_queue = self.project_queues[project_type]
 
         proc = mp.Process(
@@ -151,17 +154,17 @@ class Launcher:
             for p in procs:
                 if p.is_alive():
                     p.terminate()
-                    p.join(timeout=1)
+                    p.join(timeout=2)
                     if p.is_alive():
                         p.kill()
 
         if hasattr(self, 'django_proc') and self.django_proc.poll() is None:
             self.django_proc.terminate()
-            self.django_proc.wait(timeout=2)
+            self.django_proc.wait(timeout=3)
 
         if hasattr(self, 'eval_process') and self.eval_process.is_alive():
             self.eval_process.terminate()
-            self.eval_process.join(timeout=1)
+            self.eval_process.join(timeout=2)
 
         log.info("清理完成")
 

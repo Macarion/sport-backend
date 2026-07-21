@@ -1,13 +1,10 @@
 # inference_worker.py
 import os
-import sys
 import time
 import queue
 import multiprocessing as mp
-from config import IDLE_TIMEOUT, PROJECTS, FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS, get_logger
-from shared_memory_pool import SharedMemoryPool
-
-SHAPE = (FRAME_HEIGHT, FRAME_WIDTH, FRAME_CHANNELS)
+from .config import IDLE_TIMEOUT, PROJECTS, get_logger
+from .shared_memory_pool import SharedMemoryPool
 
 
 def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
@@ -19,7 +16,7 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
 
     match project_type:
         case 'situp':
-            from sport_situp import Inferencer
+            from .sport_situp import Inferencer
             inferencer = Inferencer()
         case _:
             raise ValueError(f"未知的运动类型: {project_type}")
@@ -38,7 +35,7 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
                 eval_queue.put((None, user_id, None, project_type, config))
                 continue
 
-            shm, frame = SharedMemoryPool.attach(shm_name, SHAPE)
+            shm, frame = SharedMemoryPool.attach(shm_name, PROJECTS[project_type]['frame_shape'])
             if frame is None:
                 log.error("无法读取共享内存 %s", shm_name)
                 shm_pool.release_block(shm_name)

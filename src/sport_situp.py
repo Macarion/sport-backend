@@ -177,7 +177,6 @@ class Evaluator:
         self.state = State.WAITING
         self.start_time = None
         self.num = 0
-        self.num_all = 0
 
         # 观测角度缓存 obsY1~obsY5：各类人体角度时序数据
         (
@@ -303,7 +302,7 @@ class Evaluator:
         drawing = config.get("drawing", True)
 
         if not has_person:
-            return
+            return None
 
         hints = []
 
@@ -573,9 +572,6 @@ class Evaluator:
                     is_new_rise = True
 
             # ========== 有效计数num累加逻辑 ==========
-            if is_new_rise:
-                self.num_all += 1
-
             if self.is_out_of_bounds:
                 self.state = State.FINISHED
                 is_new_rise = False
@@ -621,7 +617,6 @@ class Evaluator:
         return {
             "frame_id": frame_id,
             "score": self.num,
-            "num_all": self.num_all,
             "angle": body_ground_angle2,
             "hints": hints,
             "is_new_rise": is_new_rise,
