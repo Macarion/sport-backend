@@ -42,37 +42,34 @@ class Inferencer:
         - HoughCircles 圆检测
         返回 (x, y, r) 像素坐标与半径；未检测到返回 None。
         """
-        try:
-            if frame is None or not isinstance(frame, np.ndarray) or frame.size == 0:
-                return None
-
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-            lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
-            upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
-
-            mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
-            _MARK_KERNEL = np.ones((5, 5), np.uint8)
-            opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
-            edges = cv2.Canny(opening, 80, 160)
-
-            circles = cv2.HoughCircles(
-                edges,
-                cv2.HOUGH_GRADIENT,
-                1,
-                100,
-                param1=100,
-                param2=30,
-                minRadius=10,
-                maxRadius=100,
-            )
-            if circles is None:
-                return None
-
-            c = circles[0][0]
-            return (int(c[0]), int(c[1]), int(c[2]))
-        except Exception:
+        if frame is None:
             return None
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
+        upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
+
+        mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
+        _MARK_KERNEL = np.ones((5, 5), np.uint8)
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
+        edges = cv2.Canny(opening, 80, 160)
+
+        circles = cv2.HoughCircles(
+            edges,
+            cv2.HOUGH_GRADIENT,
+            1,
+            100,
+            param1=100,
+            param2=20,
+            minRadius=6,
+            maxRadius=100,
+        )
+        if circles is None:
+            return None
+
+        c = circles[0][0]
+        return (int(c[0]), int(c[1]), int(c[2]))
 
     # 循环处理函数
     def process(self, frame_id, img, config):
@@ -112,10 +109,10 @@ class Inferencer:
                     # 绘制标志物外圈+圆心点+文字
                     cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
                     cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
-                    cv2.putText(
-                        img, "Marker", (mx + mr + 10, my),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
-                    )
+                    # cv2.putText(
+                    #     img, "Marker", (mx + mr + 10, my),
+                    #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+                    # )
 
                 # 绘制全身骨骼连线
                 self.mp_drawing.draw_landmarks(
