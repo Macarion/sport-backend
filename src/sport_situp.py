@@ -32,6 +32,10 @@ class Inferencer:
             enable_segmentation=False,
         )
 
+        self.lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
+        self.upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
+        self._mark_kernel = np.ones((5, 5), np.uint8)
+
     # 标志物检测函数
     def _detect_marker_circle_bgr(self, frame: np.ndarray) -> Optional[tuple[int, int, int]]:
         """
@@ -47,12 +51,8 @@ class Inferencer:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
-        upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
-
-        mask = cv2.inRange(hsv, lower_green, upper_green)  # 设定掩膜取值范围
-        _MARK_KERNEL = np.ones((5, 5), np.uint8)
-        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, _MARK_KERNEL)
+        mask = cv2.inRange(hsv, self.lower_green, self.upper_green)  # 设定掩膜取值范围
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self._mark_kernel)  # 开运算去噪
         edges = cv2.Canny(opening, 80, 160)
 
         circles = cv2.HoughCircles(
@@ -85,6 +85,15 @@ class Inferencer:
         if results.pose_landmarks:
             # 检测到人体关键点
 
+            # ========== 圆形标志物检测 ==========
+            marker_circle = self._detect_marker_circle_bgr(img)
+            if marker_circle is not None:
+                mx, my, mr = marker_circle
+
+                # 替换关键点坐标
+                results.pose_landmarks.landmark[23].x = mx / w
+                results.pose_landmarks.landmark[23].y = my / h
+
             # 遍历全部33个人体关键点，换算像素坐标存入position
             for i in range(33):
                 # 归一化坐标转画面像素
@@ -93,26 +102,11 @@ class Inferencer:
                 cz = results.pose_landmarks.landmark[i].z  # 关键点深度值
                 points.append(PosePoint(i, cx, cy, cz))
 
-            # ========== 圆形标志物检测 ==========
-            marker_circle = self._detect_marker_circle_bgr(img)
-            if marker_circle is not None:
-                mx, my, mr = marker_circle
-
-                # 替换关键点坐标
-                points[23].x = mx
-                points[23].y = my
-                results.pose_landmarks.landmark[23].x = mx / w
-                results.pose_landmarks.landmark[23].y = my / h
-
             if drawing:
                 if marker_circle is not None:
                     # 绘制标志物外圈+圆心点+文字
                     cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
                     cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
-                    # cv2.putText(
-                    #     img, "Marker", (mx + mr + 10, my),
-                    #     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
-                    # )
 
                 # 绘制全身骨骼连线
                 self.mp_drawing.draw_landmarks(
@@ -159,12 +153,12 @@ class Inferencer:
 
 # 评测状态
 class State(IntEnum):
-    WAITING = 0
-    READY = 1
-    FLAT = 2
-    RISE = 3
-    WAIT_FLAT = 4
-    FINISHED = 5
+    WAITING = 0     # 等待开始
+    READY = 1       # 准备就绪
+    FLAT = 2        # 平躺
+    RISE = 3        # 起身
+    WAIT_FLAT = 4   # 作弊后等待平躺
+    FINISHED = 5    # 评测结束
 
 
 class Evaluator:
@@ -196,7 +190,7 @@ class Evaluator:
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
         self.flat_threshold = 20
         self.rise_threshold = 50
-        self.last_flat_angle = 90
+        self.last_flat_angle = 180
         self.last_rise_angle = 0
 
         # 流程状态标记
@@ -302,10 +296,6 @@ class Evaluator:
             return None
 
         hints = []
-
-        h = img.shape[0]
-        w = img.shape[1]
-        scaler = 1
 
         # =================================
         # 参考线标识
@@ -467,9 +457,9 @@ class Evaluator:
                 if drawing:
                     img = self.img_put_text(img, "斜度大于15°，请重新调整", 25, 15, (0, 0, 255))
             elif self.env_ifok == -4:
-                hints.append("请调整躯干低于中心线")
+                hints.append("请平躺")
                 if drawing:
-                    img = self.img_put_text(img, "请调整躯干低于中心线", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "请平躺", 25, 15, (0, 0, 255))
         elif self.state == State.READY:
             hints.append("检测成功！")
             hints.append("请开始测试")
@@ -510,14 +500,13 @@ class Evaluator:
             self.obsY1.append(body_ground_angle2)
 
             # ========== 各类作弊帧检测，赋值作弊标记 ==========
-            # 作弊1：手臂夹角≥150，连续3帧判定手臂大开借力
-            if shoulder_elbow_angle >= 120 and body_ground_angle2 > 10:
+            # 作弊1：手臂夹角≥135，连续3帧判定手臂打开借力
+            if shoulder_elbow_angle >= 135 and self.is_mid(body_ground_angle2):
                 self.arm_force_count += 1
             else:
                 self.arm_force_count = 0
-                self.is_arm_force_cheat = False
 
-            if self.arm_force_count >= 3:
+            if self.arm_force_count >= 3 and self.state == State.FLAT:
                 self.is_arm_force_cheat = True
 
             # 作弊2：人体关键点大面积出画面，判定替考换人
@@ -558,6 +547,7 @@ class Evaluator:
                 if self.is_flat(body_ground_angle2):
                     self.state = State.FLAT
                     self.is_flat_insufficient = False
+                    self.is_arm_force_cheat = False
                     self.last_rise_angle = 0
 
             # 起身判定逻辑
