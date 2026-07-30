@@ -166,7 +166,6 @@ class Evaluator:
 
     def __init__(self):
         self.state = State.WAITING
-        self.start_time = None
         self.num = 0
 
         # 观测角度缓存 obsY1~obsY5：各类人体角度时序数据
@@ -345,20 +344,6 @@ class Evaluator:
             cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
 
         # =================================
-        # 左上角时间显示
-        # ================================
-
-        if self.start_time is None:
-            self.start_time = time.time()
-        total_time = int(time.time() - self.start_time)
-        minute, second = total_time // 60, total_time % 60
-        time_str = f"{minute}\"{second}'"
-
-        if drawing:
-            img = self.img_put_text(img, str(max(0, self.num)), 25, 60, (0, 0, 255))
-            img = self.img_put_text(img, time_str, 25, 105, (255, 165, 0))
-
-        # =================================
         # 计算关键部位角度
         # ================================
 
@@ -460,12 +445,6 @@ class Evaluator:
                 hints.append("请平躺")
                 if drawing:
                     img = self.img_put_text(img, "请平躺", 25, 15, (0, 0, 255))
-        elif self.state == State.READY:
-            hints.append("检测成功！")
-            hints.append("请开始测试")
-            if drawing:
-                img = self.img_put_text(img, "检测成功！", 25, 15, (0, 0, 255))
-                img = self.img_put_text(img, "请开始测试", 400, 50, (255, 165, 0))
 
         # ========== 判定是否进入预备阶段 ==========
         # 躯干脚底夹角差值<=10，环境合格，累计预备帧
@@ -479,6 +458,13 @@ class Evaluator:
             if self.ready_count >= 10:
                 self.state = State.READY
 
+                hints.clear()
+                hints.append("检测成功！")
+                hints.append("请开始测试")
+                if drawing:
+                    img = self.img_put_text(img, "检测成功！", 25, 15, (0, 0, 255))
+                    img = self.img_put_text(img, "请开始测试", 400, 50, (255, 165, 0))
+
         body_ground_angle2 = body_ground_angle
         is_new_rise = False
        
@@ -486,7 +472,7 @@ class Evaluator:
         if self.state >= State.READY and self.state < State.FINISHED:
 
             # ========== 修正躯干夹角body_ground_angle2（分段补偿误差） ==========
-            # TODO: 不清楚为什么这么做
+            # 不清楚为什么这么做
             if body_ground_angle - abs((math.atan(k0)) / math.pi * 180) <= 15:
                 body_ground_angle2 = body_ground_angle - abs((math.atan(k0)) / math.pi * 180) + self.wucha
             if 15 < body_ground_angle - abs((math.atan(k0)) / math.pi * 180) <= 30:
