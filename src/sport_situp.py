@@ -24,7 +24,7 @@ class Inferencer:
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
         self.pose = self.mp_pose.Pose(
-            static_image_mode=False,
+            static_image_mode=True,
             model_complexity=0,  # 降低复杂度以提升速度（0最快，1中等，2最慢）
             smooth_landmarks=True,
             min_detection_confidence=0.5,
@@ -167,6 +167,7 @@ class Evaluator:
     def __init__(self):
         self.state = State.WAITING
         self.num = 0
+        self.frame_id = -1
 
         # 观测角度缓存 obsY1~obsY5：各类人体角度时序数据
         (
@@ -187,6 +188,9 @@ class Evaluator:
         self.is_out_of_bounds = False  # 人员替换/替考作弊标记
         self.is_flat_insufficient = False  # 肩背未着地作弊标记
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
+        self.is_knee_moved = False  # 膝盖移动作弊标记
+        self.knee_move_alpha = 0.05  # 膝盖移动权重，权重越大，平均值越接近当前帧
+        self.weighted_knee_point = None # 膝盖移动加权平均点
         self.flat_threshold = 20
         self.rise_threshold = 50
         self.last_flat_angle = 180
@@ -197,6 +201,7 @@ class Evaluator:
         self.env_ok_count = 0  # 环境检测合格帧计数器
         self.ready_count = 0  # 准备动作帧计数器
         self.arm_force_count = 0
+        self.ready_time = None
     
     def is_flat(self, angle):
         return angle <= self.flat_threshold
@@ -291,6 +296,12 @@ class Evaluator:
         has_person = data["has_person"]
         drawing = config.get("drawing", True)
 
+        # 丢弃乱序到达的无效帧
+        if self.frame_id >= frame_id:
+            return None
+
+        self.frame_id = frame_id
+
         if not has_person:
             return None
 
@@ -348,48 +359,47 @@ class Evaluator:
         # ================================
 
         # ========== 计算躯干与地面夹角 body_ground_angle ==========
-        A1, B1 = [], []
-        A1.append(float(points[11].x))  # 左肩X
-        A1.append(float(points[23].x))  # 脚底X
-        A1.append(float(640))
-        B1.append(float(points[11].y))  # 左肩Y
-        B1.append(float(points[23].y))  # 脚底Y
-        B1.append(float(points[23].y))
-        body_ground_angle = self.calculate_angle(A1, B1)
+        A, B = [0.0] * 3, [0.0] * 3
+        A[0] = points[11].x  # 左肩X
+        A[1] = points[23].x  # 脚底X
+        A[2] = 640
+        B[0] = points[11].y  # 左肩Y
+        B[1] = points[23].y  # 脚底Y
+        B[2] = points[23].y
+        body_ground_angle = self.calculate_angle(A, B)
         self.wucha = 8  # 固定角度补偿误差
         self.obsY3.append(body_ground_angle - abs((math.atan(k0)) / math.pi * 180))
 
-        # ========== 计算左手臂肩肘夹角 shoulder_elbow_angle ==========
-        A2, B2 = [], []
-        A2.append(float(points[16].x))
-        A2.append(float(points[14].x))
-        A2.append(float(points[12].x))
-        B2.append(float(points[16].y))
-        B2.append(float(points[14].y))
-        B2.append(float(points[12].y))
-        shoulder_elbow_angle = self.calculate_angle(A2, B2)
+        # ========== 计算右手臂肩肘夹角 shoulder_elbow_angle ==========
+        A[0] = points[16].x  # 右腕X
+        A[1] = points[14].x  # 右肘X
+        A[2] = points[12].x  # 右肩X
+        B[0] = points[16].y  # 右腕Y
+        B[1] = points[14].y  # 右肘Y
+        B[2] = points[12].y  # 右肩Y
+        shoulder_elbow_angle = self.calculate_angle(A, B)
 
-        # ========== 计算右手臂肩肘夹角 shoulder_elbow_angle2 ==========
-        A6, B6 = [], []
-        A6.append(float(points[15].x))
-        A6.append(float(points[13].x))
-        A6.append(float(points[11].x))
-        B6.append(float(points[15].y))
-        B6.append(float(points[13].y))
-        B6.append(float(points[11].y))
-        shoulder_elbow_angle2 = self.calculate_angle(A6, B6)
+        # ========== 计算左手臂肩肘夹角 shoulder_elbow_angle2 ==========
+        A[0] = points[15].x  # 左腕X
+        A[1] = points[13].x  # 左肘X
+        A[2] = points[11].x  # 左肩X
+        B[0] = points[15].y  # 左腕Y
+        B[1] = points[13].y  # 左肘Y
+        B[2] = points[11].y  # 左肩Y
+        shoulder_elbow_angle2 = self.calculate_angle(A, B)
+
         self.obsY2.append(shoulder_elbow_angle)
         self.obsY4.append(shoulder_elbow_angle2)
 
         # ========== 脚底地面基准夹角 base_angle ==========
-        A4, B4 = [], []
-        A4.append(float(points[23].x))
-        A4.append(float(points[29].x))
-        A4.append(float(640))
-        B4.append(float(points[23].y))
-        B4.append(float(points[29].y))
-        B4.append(float(points[29].y))
-        base_angle = self.calculate_angle(A4, B4)
+        A[0] = points[23].x # 左臀部X
+        A[1] = points[29].x # 左脚底X
+        A[2] = 640
+        B[0] = points[23].y # 左臀部Y
+        B[1] = points[29].y # 左脚底Y
+        B[2] = points[29].y # 左脚底Y
+        base_angle = self.calculate_angle(A, B)
+
         self.obsY5.append(body_ground_angle - abs((math.atan(k1)) / math.pi * 180))
 
         # ========== 环境合格判定逻辑：肩、头、脚关键点在地面线下方 ==========
@@ -457,13 +467,18 @@ class Evaluator:
             # 10帧预备姿态，正式开启测试
             if self.ready_count >= 10:
                 self.state = State.READY
+                self.ready_time = time.time()
 
-                hints.clear()
-                hints.append("检测成功！")
-                hints.append("请开始测试")
-                if drawing:
-                    img = self.img_put_text(img, "检测成功！", 25, 15, (0, 0, 255))
-                    img = self.img_put_text(img, "请开始测试", 400, 50, (255, 165, 0))
+        if (
+            self.ready_time is not None
+            and time.time() - self.ready_time <= 3
+        ):
+            hints.clear()
+            hints.append("检测成功！")
+            hints.append("请开始测试")
+            if drawing:
+                img = self.img_put_text(img, "检测成功！", 25, 15, (0, 0, 255))
+                img = self.img_put_text(img, "请开始测试", 400, 50, (255, 165, 0))
 
         body_ground_angle2 = body_ground_angle
         is_new_rise = False
@@ -524,6 +539,19 @@ class Evaluator:
             ):
                 self.is_rise_insufficient = True
 
+            # 作弊5：腿部移动/其他人抢走关键点
+            if self.weighted_knee_point == None:
+                self.weighted_knee_point = points[25]
+
+            if (
+                self.weighted_knee_point.x - points[25].x > 60
+                or self.weighted_knee_point.y - points[25].y > 60
+            ):
+                self.is_knee_moved = True
+
+            self.weighted_knee_point.x = self.weighted_knee_point.x * (1 - self.knee_move_alpha) + points[25].x * self.knee_move_alpha
+            self.weighted_knee_point.y = self.weighted_knee_point.y * (1 - self.knee_move_alpha) + points[25].y * self.knee_move_alpha
+
             # 平躺判定逻辑
             if (
                 self.state == State.READY
@@ -545,7 +573,7 @@ class Evaluator:
                     is_new_rise = True
 
             # ========== 有效计数num累加逻辑 ==========
-            if self.is_out_of_bounds:
+            if self.is_out_of_bounds or self.is_knee_moved:
                 self.state = State.FINISHED
                 is_new_rise = False
 
@@ -556,15 +584,18 @@ class Evaluator:
             if is_new_rise:
                 self.num += 1
 
+        if self.state >= State.READY:
             # ========== 作弊状态提示 ==========
             if self.is_arm_force_cheat:
                 hints.append("手臂打开借力")
-            if self.is_out_of_bounds:
-                hints.append("测试者出画面")
             if self.is_flat_insufficient:
                 hints.append("肩背未着地")
             if self.is_rise_insufficient:
                 hints.append("起身角度不足")
+            if self.is_out_of_bounds:
+                hints.append("测试者出画面")
+            if self.is_knee_moved:
+                hints.append("膝盖移动过多")
 
             # ========== 作弊状态绘制 ==========
             if drawing:
@@ -572,14 +603,18 @@ class Evaluator:
                 if self.is_arm_force_cheat:
                     img = self.img_put_text(img, "手臂打开借力", 25, hint_y, (255, 0, 255))
                     hint_y += 25
-                if self.is_out_of_bounds:
-                    img = self.img_put_text(img, "测试者出画面", 25, hint_y, (255, 0, 255))
-                    hint_y += 25
                 if self.is_flat_insufficient:
                     img = self.img_put_text(img, "肩背未着地", 25, hint_y, (255, 0, 255))
                     hint_y += 25
                 if self.is_rise_insufficient:
                     img = self.img_put_text(img, "起身角度不足", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if self.is_out_of_bounds:
+                    img = self.img_put_text(img, "测试者出画面", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if self.is_knee_moved:
+                    img = self.img_put_text(img, "膝盖移动过多", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
 
         # ========== 结束阶段主逻辑 ==========
         if self.state == State.FINISHED:
@@ -589,6 +624,7 @@ class Evaluator:
 
         return {
             "frame_id": frame_id,
+            "ready": self.state >= State.READY,
             "score": self.num,
             "angle": body_ground_angle2,
             "hints": hints,
@@ -597,6 +633,7 @@ class Evaluator:
             "is_out_of_bounds": self.is_out_of_bounds,
             "is_flat_insufficient": self.is_flat_insufficient,
             "is_rise_insufficient": self.is_rise_insufficient,
+            "is_knee_move": self.is_knee_moved,
             "timestamp": int(round(time.time() * 1000)),
         }
 

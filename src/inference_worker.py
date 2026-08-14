@@ -32,7 +32,7 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
 
             # 检查用户是否主动结束
             if frame_id < 0:
-                eval_queue.put((None, user_id, None, project_type, config))
+                eval_queue.put((None, user_id, frame_id, None, project_type, config))
                 continue
 
             shm, frame = SharedMemoryPool.attach(shm_name, PROJECTS[project_type]['frame_shape'])
@@ -44,7 +44,7 @@ def run_inference_worker(project_type, task_queue, shm_pool, eval_queue):
             result = inferencer.process(frame_id, frame, config)
             shm.close()
 
-            eval_queue.put((shm_name, user_id, result, project_type, config))
+            eval_queue.put((shm_name, user_id, frame_id, result, project_type, config))
 
         except queue.Empty:
             elapsed = time.time() - idle_start

@@ -1,6 +1,7 @@
 # launcher.py
 import os
 import sys
+import math
 import queue
 import signal
 import atexit
@@ -108,7 +109,7 @@ class Launcher:
         current_users = self.user_counts.get(proj, 0)
         current_processes = len(self.processes.get(proj, []))
 
-        target = (current_users + USERS_PER_PROCESS - 1) // USERS_PER_PROCESS
+        target = math.ceil(current_users / USERS_PER_PROCESS)
         target = min(target, MAX_PROCESSES_PER_PROJECT)
         target = max(1, target) if current_users > 0 else 0
 

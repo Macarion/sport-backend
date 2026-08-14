@@ -31,9 +31,9 @@ PROJECTS = {
 }
 
 # ---------- 动态伸缩参数 ----------
-USERS_PER_PROCESS = 1
-MAX_PROCESSES_PER_PROJECT = 4
-IDLE_TIMEOUT = 60
+USERS_PER_PROCESS = 0.5         # 每个进程的用户数，小于1表示多个进程处理一个用户
+MAX_PROCESSES_PER_PROJECT = 4   # 每个项目最多启动的进程数
+IDLE_TIMEOUT = 60               # 进程空闲超时时间（秒）
 
 # ---------- 共享内存池配置 ----------
 SHM_POOL_SIZE = 30
