@@ -10,7 +10,7 @@ import multiprocessing as mp
 from .queue_manager import QueueManager
 
 from .config import (
-    PROJECTS, USERS_PER_PROCESS, MAX_PROCESSES_PER_PROJECT,
+    SPORTS, USERS_PER_PROCESS, MAX_PROCESSES_PER_PROJECT,
     IDLE_TIMEOUT, MANAGER_HOST, MANAGER_PORT, AUTH_KEY, get_logger
 )
 
@@ -32,15 +32,15 @@ class Launcher:
         self.cmd_queue = self.manager.get_command_queue()
         self.shm_pool = self.manager.get_shm_pool()
 
-        self.project_queues = {}
-        for proj in PROJECTS.keys():
-            self.project_queues[proj] = self.manager.get_task_queue(proj)
+        self.task_queues = {}
+        for proj in SPORTS.keys():
+            self.task_queues[proj] = self.manager.get_task_queue(proj)
 
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
         atexit.register(self.cleanup)
 
-        for proj in PROJECTS.keys():
+        for proj in SPORTS.keys():
             self.user_counts[proj] = 0
 
         self.start_django()
@@ -81,21 +81,21 @@ class Launcher:
         self.eval_process = proc
         log.info("评测进程 PID: %d", proc.pid)
 
-    def spawn_inference_process(self, project_type):
+    def spawn_inference_process(self, sport_type):
         from .inference_worker import run_inference_worker
-        task_queue = self.project_queues[project_type]
+        task_queue = self.task_queues[sport_type]
 
         proc = mp.Process(
             target=run_inference_worker,
-            args=(project_type, task_queue, self.shm_pool, self.eval_queue),
+            args=(sport_type, task_queue, self.shm_pool, self.eval_queue),
             daemon=True
         )
         proc.start()
 
-        if project_type not in self.processes:
-            self.processes[project_type] = []
-        self.processes[project_type].append(proc)
-        log.info("创建推理进程: %s, PID=%d", project_type, proc.pid)
+        if sport_type not in self.processes:
+            self.processes[sport_type] = []
+        self.processes[sport_type].append(proc)
+        log.info("创建推理进程: %s, PID=%d", sport_type, proc.pid)
         return proc
 
     def handle_command(self, cmd, proj, delta):
@@ -132,7 +132,7 @@ class Launcher:
                 cmd, proj, delta = self.cmd_queue.get(timeout=1.0)
                 self.handle_command(cmd, proj, delta)
             except queue.Empty:
-                for proj in PROJECTS.keys():
+                for proj in SPORTS.keys():
                     self._adjust_processes(proj)
             except (KeyboardInterrupt, EOFError):
                 break

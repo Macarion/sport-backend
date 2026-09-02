@@ -15,7 +15,7 @@ def get_logger(name):
     return logging.getLogger(name)
 
 # ---------- 项目配置 ----------
-PROJECTS = {
+SPORTS = {
     'situp': {
         'frame_shape': (480, 640, 3)
     },
@@ -39,9 +39,9 @@ IDLE_TIMEOUT = 60               # 进程空闲超时时间（秒）
 SHM_POOL_SIZE = 30
 SHM_RECLAIM_TIMEOUT = 10  # 共享内存块超时回收时间（秒）
 
-MAX_FRAME_HEIGHT = max(project['frame_shape'][0] for project in PROJECTS.values())
-MAX_FRAME_WIDTH = max(project['frame_shape'][1] for project in PROJECTS.values())
-MAX_FRAME_CHANNELS = max(project['frame_shape'][2] for project in PROJECTS.values())
+MAX_FRAME_HEIGHT = max(project['frame_shape'][0] for project in SPORTS.values())
+MAX_FRAME_WIDTH = max(project['frame_shape'][1] for project in SPORTS.values())
+MAX_FRAME_CHANNELS = max(project['frame_shape'][2] for project in SPORTS.values())
 MAX_FRAME_BYTES = MAX_FRAME_WIDTH * MAX_FRAME_HEIGHT * MAX_FRAME_CHANNELS
 
 # ---------- 进程间通信（IPC）配置 ----------

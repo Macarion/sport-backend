@@ -5,6 +5,7 @@ import numpy as np
 from enum import IntEnum
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
+from .task import SportTask
 
 
 class PosePoint:
@@ -19,7 +20,7 @@ class PosePoint:
 class Inferencer:
 
     def __init__(self):
-        from config import SITUP_STATIC_IMAGE_MODE, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER
+        from .config import SITUP_STATIC_IMAGE_MODE, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER
         import mediapipe as mp
 
         self.mp_pose = mp.solutions.pose
@@ -74,7 +75,11 @@ class Inferencer:
         return (int(c[0]), int(c[1]), int(c[2]))
 
     # 循环处理函数
-    def process(self, frame_id, img, config):
+    def process(self, task: SportTask):
+        frame_id = task.get_frame_id()
+        img = task.get_frame()
+        config = task.get_config()
+
         drawing = config.get("drawing", True)
 
         h = img.shape[0]
@@ -295,7 +300,12 @@ class Evaluator:
     # ==========================
     # 循环处理函数
     # ==========================
-    def process(self, img, data, config):
+    def process(self, task: SportTask):
+
+        img = task.get_frame()
+        data = task.get_data()
+        config = task.get_config()
+
         frame_id = data["frame_id"]
         points: list[PosePoint] = data["points"]
         has_person = data["has_person"]
