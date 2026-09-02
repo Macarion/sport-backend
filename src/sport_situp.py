@@ -19,12 +19,13 @@ class PosePoint:
 class Inferencer:
 
     def __init__(self):
+        from config import SITUP_STATIC_IMAGE_MODE, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER
         import mediapipe as mp
 
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
         self.pose = self.mp_pose.Pose(
-            static_image_mode=True,
+            static_image_mode=SITUP_STATIC_IMAGE_MODE,
             model_complexity=0,  # 降低复杂度以提升速度（0最快，1中等，2最慢）
             smooth_landmarks=True,
             min_detection_confidence=0.5,
@@ -32,8 +33,9 @@ class Inferencer:
             enable_segmentation=False,
         )
 
-        self.lower_green = np.array([35, 50, 100])  # 设定绿色的阈值下限
-        self.upper_green = np.array([100, 255, 255])  # 设定绿色的阈值上限
+        self.lower_green = np.array(SITUP_MARKER_LOWER)  # 设定绿色的阈值下限
+        self.upper_green = np.array(SITUP_MARKER_UPPER)  # 设定绿色的阈值上限
+        self.marker_enabled = SITUP_MARKER_ENABLED
         self._mark_kernel = np.ones((5, 5), np.uint8)
 
     # 标志物检测函数
@@ -86,7 +88,10 @@ class Inferencer:
             # 检测到人体关键点
 
             # ========== 圆形标志物检测 ==========
-            marker_circle = self._detect_marker_circle_bgr(img)
+            if self.marker_enabled:
+                marker_circle = self._detect_marker_circle_bgr(img)
+            else:
+                marker_circle = None
             if marker_circle is not None:
                 mx, my, mr = marker_circle
 
