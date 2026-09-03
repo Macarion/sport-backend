@@ -28,7 +28,7 @@ def run_inference_worker(sport_type, task_queue, shm_pool, eval_queue):
 
     while True:
         try:
-            task = SportTask.from_bytes(task_queue.get(timeout=IDLE_TIMEOUT))
+            task = SportTask.from_bytes(task_queue.get(timeout=IDLE_TIMEOUT + 0.1))
             idle_start = time.time()
 
             # 检查用户是否主动结束
@@ -36,17 +36,8 @@ def run_inference_worker(sport_type, task_queue, shm_pool, eval_queue):
                 eval_queue.put(task)
                 continue
 
-            shm_name = task.get_shm_name()
-            shm, frame = SharedMemoryPool.attach(shm_name, SPORTS[sport_type]['frame_shape'])
-            if frame is None:
-                log.error("无法读取共享内存 %s", shm_name)
-                shm_pool.release_block(shm_name)
-                continue
-
-            task.set_frame(frame)
-            data = inferencer.process(task)
-            task.clear_frame()
-            shm.close()
+            with task.link_frame():
+                data = inferencer.process(task)
 
             task.set_data(data)
             eval_queue.put(task)
