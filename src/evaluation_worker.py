@@ -11,6 +11,7 @@ def run_evaluation_worker(eval_queue, result_queue, shm_pool):
     log.info("进程启动，PID=%d", os.getpid())
 
     from .sport_situp import Evaluator as SitupEvaluator
+    from .sport_pullup import Evaluator as PullupEvaluator
 
     user_sessions = {}
 
@@ -34,7 +35,11 @@ def run_evaluation_worker(eval_queue, result_queue, shm_pool):
                 match sport_type:
                     case "situp":
                         evaluator = SitupEvaluator()
-                        log.info("创建新会话，用户 %s", uid)
+                        log.info("创建新会话, 用户 %s, 运动类型 %s", uid, sport_type)
+                        user_sessions[uid] = evaluator
+                    case "pullup":
+                        evaluator = PullupEvaluator()
+                        log.info("创建新会话, 用户 %s, 运动类型 %s", uid, sport_type)
                         user_sessions[uid] = evaluator
                     case _:
                         raise ValueError(f"未知的运动类型: {sport_type}")

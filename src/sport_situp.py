@@ -76,7 +76,6 @@ class Inferencer:
 
     # 循环处理函数
     def process(self, task: SportTask):
-        frame_id = task.get_frame_id()
         img = task.get_frame()
         config = task.get_config()
 
@@ -155,8 +154,7 @@ class Inferencer:
                         cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
 
         return {
-            "frame_id": frame_id,
-            "has_person": results.pose_landmarks,
+            "has_person": results.pose_landmarks is not None,
             "points": points,
         }
 
@@ -305,8 +303,8 @@ class Evaluator:
         img = task.get_frame()
         data = task.get_data()
         config = task.get_config()
+        frame_id = task.get_frame_id()
 
-        frame_id = data["frame_id"]
         points: list[PosePoint] = data["points"]
         has_person = data["has_person"]
         drawing = config.get("drawing", True)

@@ -19,6 +19,9 @@ def run_inference_worker(sport_type, task_queue, shm_pool, eval_queue):
         case 'situp':
             from .sport_situp import Inferencer
             inferencer = Inferencer()
+        case 'pullup':
+            from .sport_pullup import Inferencer
+            inferencer = Inferencer()
         case _:
             raise ValueError(f"未知的运动类型: {sport_type}")
 
