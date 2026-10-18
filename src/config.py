@@ -31,7 +31,7 @@ SPORTS = {
 }
 
 # ---------- 动态伸缩参数 ----------
-USERS_PER_PROCESS = 0.5         # 每个进程的用户数，小于1表示多个进程处理一个用户
+USERS_PER_PROCESS = 1         # 每个进程的用户数，小于1表示多个进程处理一个用户
 MAX_PROCESSES_PER_PROJECT = 4   # 每个项目最多启动的进程数
 IDLE_TIMEOUT = 60               # 进程空闲超时时间（秒）
 
@@ -51,6 +51,15 @@ AUTH_KEY = b'bodytest_secret_key'
 
 # ---------- 仰卧起坐配置 ----------
 SITUP_STATIC_IMAGE_MODE = True
+
+# 姿态估计后端: 'blazepose'(MediaPipe BlazePose) 或 'yolo'(Ultralytics YOLO Pose)
+SITUP_POSE_BACKEND = 'yolo'
+
+# YOLO Pose 配置（仅 SITUP_POSE_BACKEND == 'yolo' 时生效）
+SITUP_YOLO_MODEL_PATH = 'yolov8n-pose.pt'  # 权重文件，首次运行时自动下载
+SITUP_YOLO_IMG_SZ = 640
+SITUP_YOLO_BOX_CONF = 0.5
+SITUP_YOLO_KPT_CONF = 0.5
 
 SITUP_MARKER_ENABLED = False
 SITUP_MARKER_LOWER = (35, 50, 100)

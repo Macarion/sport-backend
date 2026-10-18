@@ -17,22 +17,10 @@ class PosePoint:
         self.z = z
 
 
-class Inferencer:
+class _BasePoseInferencer:
 
     def __init__(self):
-        from .config import SITUP_STATIC_IMAGE_MODE, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER
-        import mediapipe as mp
-
-        self.mp_pose = mp.solutions.pose
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.pose = self.mp_pose.Pose(
-            static_image_mode=SITUP_STATIC_IMAGE_MODE,
-            model_complexity=0,  # 降低复杂度以提升速度（0最快，1中等，2最慢）
-            smooth_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-            enable_segmentation=False,
-        )
+        from .config import SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER
 
         self.lower_green = np.array(SITUP_MARKER_LOWER)  # 设定绿色的阈值下限
         self.upper_green = np.array(SITUP_MARKER_UPPER)  # 设定绿色的阈值上限
@@ -73,6 +61,76 @@ class Inferencer:
 
         c = circles[0][0]
         return (int(c[0]), int(c[1]), int(c[2]))
+
+    def _apply_marker(self, img: np.ndarray, points: list[PosePoint]) -> Optional[tuple[int, int, int]]:
+        """可选的圆形标志物检测；命中时替换左髋(23)坐标，返回 (x, y, r) 或 None。"""
+        if not self.marker_enabled:
+            return None
+
+        marker_circle = self._detect_marker_circle_bgr(img)
+        if marker_circle is not None:
+            mx, my, _mr = marker_circle
+            points[23].x = mx
+            points[23].y = my
+        return marker_circle
+
+    def _draw_marker(self, img: np.ndarray, marker_circle: tuple[int, int, int]):
+        mx, my, mr = marker_circle
+        # 绘制标志物外圈+圆心点+文字
+        cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
+        cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
+
+    def _draw_keypoints(self, img: np.ndarray, points: list[PosePoint]):
+        """遍历全部33个人体关键点，按部位绘制不同颜色圆点。"""
+        radius = 2  # 关键点绘制圆点半径
+        for p in points:
+            # 按关键点分组填充不同颜色圆点
+            if p.idx == 0:
+                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
+            elif p.idx in [11, 12]:
+                cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)
+            elif p.idx in [23, 24]:
+                cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)
+            elif p.idx in [13, 14]:
+                cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)
+            elif p.idx in [25, 26]:
+                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
+            elif p.idx in [15, 16, 27, 28]:
+                cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)
+            elif p.idx in [17, 19, 21]:
+                cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
+            elif p.idx in [18, 20, 22]:
+                cv2.circle(img, (p.x, p.y), radius, (16, 144, 247), -1)
+            elif p.idx in [27, 29, 31]:
+                cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)
+            elif p.idx in [28, 30, 32]:
+                cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)
+            elif p.idx in [9, 10]:
+                cv2.circle(img, (p.x, p.y), radius, (205, 235, 255), -1)
+            elif p.idx in [1, 2, 3, 4, 5, 6, 7, 8]:
+                cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
+            else:
+                cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
+
+
+class BlazePoseInferencer(_BasePoseInferencer):
+    """MediaPipe BlazePose 姿态推理（单人，33 关键点）。"""
+
+    def __init__(self):
+        super().__init__()
+        from .config import SITUP_STATIC_IMAGE_MODE
+        import mediapipe as mp
+
+        self.mp_pose = mp.solutions.pose
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.pose = self.mp_pose.Pose(
+            static_image_mode=SITUP_STATIC_IMAGE_MODE,
+            model_complexity=0,  # 降低复杂度以提升速度（0最快，1中等，2最慢）
+            smooth_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
+            enable_segmentation=False,
+        )
 
     # 循环处理函数
     def process(self, task: SportTask):
@@ -123,40 +181,236 @@ class Inferencer:
                 )
 
                 # 遍历全部33个人体关键点，绘制不同颜色关键点
-                radius = 2  # 关键点绘制圆点半径
-                for p in points:
-                    # 按关键点分组填充不同颜色圆点
-                    if p.idx == 0:
-                        cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
-                    elif p.idx in [11, 12]:
-                        cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)
-                    elif p.idx in [23, 24]:
-                        cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)
-                    elif p.idx in [13, 14]:
-                        cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)
-                    elif p.idx in [25, 26]:
-                        cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
-                    elif p.idx in [15, 16, 27, 28]:
-                        cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)
-                    elif p.idx in [17, 19, 21]:
-                        cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
-                    elif p.idx in [18, 20, 22]:
-                        cv2.circle(img, (p.x, p.y), radius, (16, 144, 247), -1)
-                    elif p.idx in [27, 29, 31]:
-                        cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)
-                    elif p.idx in [28, 30, 32]:
-                        cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)
-                    elif p.idx in [9, 10]:
-                        cv2.circle(img, (p.x, p.y), radius, (205, 235, 255), -1)
-                    elif p.idx in [1, 2, 3, 4, 5, 6, 7, 8]:
-                        cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
-                    else:
-                        cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
+                self._draw_keypoints(img, points)
 
         return {
             "has_person": results.pose_landmarks is not None,
             "points": points,
         }
+
+
+class YoloPoseInferencer(_BasePoseInferencer):
+    """Ultralytics YOLO Pose 姿态推理（多人，COCO 17 关键点）。
+
+    输出仍按 BlazePose 33 关键点索引组织，供下游 Evaluator 复用；
+    选人策略：按"靠画面中心 + 框面积大"加权得分最高者（不依赖平躺姿态）。
+    """
+
+    # YOLO COCO-17 -> BlazePose-33 索引映射
+    COCO_TO_BLAZEPOSE = {
+        0: 0,    # nose
+        1: 2,    # left_eye
+        2: 5,    # right_eye
+        3: 7,    # left_ear
+        4: 8,    # right_ear
+        5: 11,   # left_shoulder
+        6: 12,   # right_shoulder
+        7: 13,   # left_elbow
+        8: 14,   # right_elbow
+        9: 15,   # left_wrist
+        10: 16,  # right_wrist
+        11: 23,  # left_hip
+        12: 24,  # right_hip
+        13: 25,  # left_knee
+        14: 26,  # right_knee
+        15: 27,  # left_ankle
+        16: 28,  # right_ankle
+    }
+
+    # COCO 无对应点、但评测代码会用到的 BlazePose 索引，用最近的点近似填充
+    # blaze_idx <- source_blaze_idx
+    EXTRA_BLAZE_FILLS = {
+        3: 2,    # left_eye_outer <- left_eye
+        6: 5,    # right_eye_outer <- right_eye
+        29: 27,  # left_heel <- left_ankle（评测中作为左脚底/脚踝使用）
+        30: 28,  # right_heel <- right_ankle
+        31: 27,  # left_foot_index <- left_ankle
+        32: 28,  # right_foot_index <- right_ankle
+    }
+
+    # 映射到 BlazePose 索引后的骨架连线（对应 COCO 连线）
+    MAPPED_SKELETON = [
+        (2, 5), (2, 7), (5, 8),                    # 眼-耳
+        (11, 12),                                  # 双肩
+        (11, 13), (13, 15),                        # 左臂
+        (12, 14), (14, 16),                        # 右臂
+        (11, 23), (12, 24), (23, 24),              # 躯干
+        (23, 25), (25, 29),                        # 左腿
+        (24, 26), (26, 30),                        # 右腿
+    ]
+
+    # COCO 17 关键点骨架连接（绘制所有人用）
+    COCO_SKELETON = [
+        (0, 1), (0, 2), (1, 3), (2, 4),            # 头部
+        (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),   # 双臂
+        (5, 11), (6, 12), (11, 12),                # 躯干
+        (11, 13), (13, 15), (12, 14), (14, 16),    # 双腿
+    ]
+
+    # 选人打分权重：靠画面中心 + 框面积大
+    CENTER_WEIGHT = 0.5
+    AREA_WEIGHT = 0.5
+
+    def __init__(self):
+        super().__init__()
+        from ultralytics import YOLO
+        from .config import (
+            SITUP_YOLO_MODEL_PATH,
+            SITUP_YOLO_IMG_SZ,
+            SITUP_YOLO_BOX_CONF,
+            SITUP_YOLO_KPT_CONF,
+        )
+
+        self.model = YOLO(SITUP_YOLO_MODEL_PATH)  # 首次运行自动下载权重
+        self.img_sz = SITUP_YOLO_IMG_SZ
+        self.box_conf = SITUP_YOLO_BOX_CONF
+        self.kpt_conf = SITUP_YOLO_KPT_CONF
+
+    def _map_to_blazepose(self, kpt_xy: np.ndarray) -> list[PosePoint]:
+        """将 COCO 17 像素坐标映射为 BlazePose 33 点格式（z 恒为 0）。"""
+        points = [PosePoint(i, 0, 0, 0.0) for i in range(33)]
+
+        for coco_idx, blaze_idx in self.COCO_TO_BLAZEPOSE.items():
+            points[blaze_idx] = PosePoint(
+                blaze_idx, int(kpt_xy[coco_idx][0]), int(kpt_xy[coco_idx][1]), 0.0
+            )
+
+        # 填充评测用到但 COCO 缺失的近似点
+        for blaze_idx, src_idx in self.EXTRA_BLAZE_FILLS.items():
+            src = points[src_idx]
+            points[blaze_idx] = PosePoint(blaze_idx, src.x, src.y, src.z)
+
+        return points
+
+    def _draw_skeleton(self, img: np.ndarray, points: list[PosePoint]):
+        for a, b in self.MAPPED_SKELETON:
+            cv2.line(img, (points[a].x, points[a].y), (points[b].x, points[b].y), (0, 255, 255), 2, cv2.LINE_AA)
+
+    def _select_person(self, r, frame_shape) -> int:
+        """按"靠画面中心 + 框面积大"加权选人，返回检测索引。
+
+        两者各自归一化到 [0,1] 后加权求和，得分最高者当选。
+        不依赖平躺姿态，测试开始前也可稳定选人。
+        """
+        h, w = frame_shape[:2]
+        cx0, cy0 = w / 2.0, h / 2.0
+        max_dist = math.hypot(cx0, cy0)
+
+        boxes = r.boxes.xyxy.cpu().numpy()
+        areas = np.maximum(boxes[:, 2] - boxes[:, 0], 0) * np.maximum(boxes[:, 3] - boxes[:, 1], 0)
+        max_area = areas.max() if areas.size else 0.0
+
+        best_idx, best_score = 0, float("-inf")
+        for i, box in enumerate(boxes):
+            x1, y1, x2, y2 = box
+            bcx, bcy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+            # 距中心越近分越高
+            center_score = 1.0 - math.hypot(bcx - cx0, bcy - cy0) / max_dist
+            # 面积越大分越高（相对当前最大框归一化）
+            area_score = float(areas[i] / max_area) if max_area > 0 else 0.0
+            score = self.CENTER_WEIGHT * center_score + self.AREA_WEIGHT * area_score
+            if score > best_score:
+                best_score, best_idx = score, i
+        return best_idx
+
+    def _draw_persons(self, img: np.ndarray, r, selected_idx: int):
+        """选中者：框+骨架+关键点；其他人：仅画框。"""
+        if r.boxes is None or len(r.boxes) == 0:
+            return
+
+        kpt_conf_all = r.keypoints.conf if r.keypoints is not None else None
+        n = len(r.boxes)
+        for i in range(n):
+            box = r.boxes.xyxy[i].cpu().numpy()
+            box_conf = float(r.boxes.conf[i])
+            x1, y1, x2, y2 = (int(v) for v in box)
+            selected = (i == selected_idx)
+
+            if selected:
+                color = (255, 0, 0)  # 蓝框标记被选中者
+                label = f"target {box_conf:.2f}"
+            else:
+                color = (0, 255, 0)
+                label = f"person {box_conf:.2f}"
+            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                img, label,
+                (x1, max(y1 - 8, 16)), cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, color, 2, cv2.LINE_AA,
+            )
+
+            if not selected or r.keypoints is None:
+                continue
+
+            kpt_xy = r.keypoints.xy[i].cpu().numpy()
+            if kpt_conf_all is not None:
+                kpt_conf = kpt_conf_all[i].cpu().numpy()
+            else:
+                kpt_conf = np.ones(len(kpt_xy), dtype=np.float32)
+
+            def pt(j, kpt=kpt_xy):
+                return (int(kpt[j][0]), int(kpt[j][1]))
+
+            for a, b in self.COCO_SKELETON:
+                if kpt_conf[a] > self.kpt_conf and kpt_conf[b] > self.kpt_conf:
+                    cv2.line(img, pt(a), pt(b), (0, 255, 255), 2, cv2.LINE_AA)
+            for j in range(len(kpt_xy)):
+                if kpt_conf[j] > self.kpt_conf:
+                    cv2.circle(img, pt(j), 4, (0, 0, 255), -1, cv2.LINE_AA)
+
+    # 循环处理函数
+    def process(self, task: SportTask):
+        img = task.get_frame()
+        config = task.get_config()
+
+        drawing = config.get("drawing", True)
+
+        points: list[PosePoint] = []
+
+        # YOLO 推理直接使用 BGR 帧
+        results = self.model.predict(
+            img, imgsz=self.img_sz, conf=self.box_conf, verbose=False,
+        )
+        r = results[0]
+
+        has_person = r.keypoints is not None and len(r.keypoints) > 0
+
+        if has_person:
+            # 选人：画面中心距离 + 框面积加权
+            sel = self._select_person(r, img.shape)
+            kpt_xy = r.keypoints.xy[sel].cpu().numpy()  # (17, 2) 像素坐标
+
+            points = self._map_to_blazepose(kpt_xy)
+
+            # ========== 圆形标志物检测 ==========
+            marker_circle = self._apply_marker(img, points)
+
+            if drawing:
+                if marker_circle is not None:
+                    self._draw_marker(img, marker_circle)
+
+                # 选中者画框+骨架+关键点，其他人只画框
+                self._draw_persons(img, r, sel)
+                # 被评测者：额外绘制映射后的 BlazePose 彩色关键点
+                self._draw_skeleton(img, points)
+                self._draw_keypoints(img, points)
+
+        return {
+            "has_person": has_person,
+            "points": points,
+        }
+
+
+def Inferencer():
+    """按配置创建仰卧起坐姿态推理器。"""
+    from .config import SITUP_POSE_BACKEND
+
+    backend = (SITUP_POSE_BACKEND or "blazepose").lower()
+    if backend == "yolo":
+        return YoloPoseInferencer()
+    if backend == "blazepose":
+        return BlazePoseInferencer()
+    raise ValueError(f"未知的姿态后端: {SITUP_POSE_BACKEND!r}，可选 'blazepose' / 'yolo'")
 
 
 # 评测状态
