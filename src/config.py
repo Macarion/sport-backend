@@ -56,7 +56,7 @@ SITUP_STATIC_IMAGE_MODE = True
 SITUP_POSE_BACKEND = 'yolo'
 
 # YOLO Pose 配置（仅 SITUP_POSE_BACKEND == 'yolo' 时生效）
-SITUP_YOLO_MODEL_PATH = 'yolov8n-pose.pt'  # 权重文件，首次运行时自动下载
+SITUP_YOLO_MODEL_PATH = 'vendor/yolo_pose/yolov8n-pose.pt'  # 权重文件，首次运行时自动下载
 SITUP_YOLO_IMG_SZ = 640
 SITUP_YOLO_BOX_CONF = 0.5
 SITUP_YOLO_KPT_CONF = 0.5
