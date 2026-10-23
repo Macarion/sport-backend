@@ -50,12 +50,7 @@ MANAGER_PORT = 50000
 AUTH_KEY = b'bodytest_secret_key'
 
 # ---------- 仰卧起坐配置 ----------
-SITUP_STATIC_IMAGE_MODE = True
-
-# 姿态估计后端: 'blazepose'(MediaPipe BlazePose) 或 'yolo'(Ultralytics YOLO Pose)
-SITUP_POSE_BACKEND = 'yolo'
-
-# YOLO Pose 配置（仅 SITUP_POSE_BACKEND == 'yolo' 时生效）
+# YOLO Pose 配置
 SITUP_YOLO_MODEL_PATH = 'vendor/yolo_pose/yolov8n-pose.pt'  # 权重文件，首次运行时自动下载
 SITUP_YOLO_IMG_SZ = 640
 SITUP_YOLO_BOX_CONF = 0.5

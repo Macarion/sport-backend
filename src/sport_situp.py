@@ -63,15 +63,15 @@ class _BasePoseInferencer:
         return (int(c[0]), int(c[1]), int(c[2]))
 
     def _apply_marker(self, img: np.ndarray, points: list[PosePoint]) -> Optional[tuple[int, int, int]]:
-        """可选的圆形标志物检测；命中时替换左髋(23)坐标，返回 (x, y, r) 或 None。"""
+        """可选的圆形标志物检测；命中时替换左髋(11)坐标，返回 (x, y, r) 或 None。"""
         if not self.marker_enabled:
             return None
 
         marker_circle = self._detect_marker_circle_bgr(img)
         if marker_circle is not None:
             mx, my, _mr = marker_circle
-            points[23].x = mx
-            points[23].y = my
+            points[11].x = mx
+            points[11].y = my
         return marker_circle
 
     def _draw_marker(self, img: np.ndarray, marker_circle: tuple[int, int, int]):
@@ -81,163 +81,38 @@ class _BasePoseInferencer:
         cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
 
     def _draw_keypoints(self, img: np.ndarray, points: list[PosePoint]):
-        """遍历全部33个人体关键点，按部位绘制不同颜色圆点。"""
+        """遍历 COCO 17 个人体关键点，按部位绘制不同颜色圆点。"""
         radius = 2  # 关键点绘制圆点半径
         for p in points:
             # 按关键点分组填充不同颜色圆点
             if p.idx == 0:
-                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
-            elif p.idx in [11, 12]:
-                cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)
-            elif p.idx in [23, 24]:
-                cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)
-            elif p.idx in [13, 14]:
-                cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)
-            elif p.idx in [25, 26]:
-                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)
-            elif p.idx in [15, 16, 27, 28]:
-                cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)
-            elif p.idx in [17, 19, 21]:
-                cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
-            elif p.idx in [18, 20, 22]:
-                cv2.circle(img, (p.x, p.y), radius, (16, 144, 247), -1)
-            elif p.idx in [27, 29, 31]:
-                cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)
-            elif p.idx in [28, 30, 32]:
-                cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)
+                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)      # 鼻
+            elif p.idx in [1, 2, 3, 4]:
+                cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)   # 眼、耳
+            elif p.idx in [5, 6]:
+                cv2.circle(img, (p.x, p.y), radius, (223, 155, 6), -1)    # 肩
+            elif p.idx in [7, 8]:
+                cv2.circle(img, (p.x, p.y), radius, (140, 47, 240), -1)   # 肘
             elif p.idx in [9, 10]:
-                cv2.circle(img, (p.x, p.y), radius, (205, 235, 255), -1)
-            elif p.idx in [1, 2, 3, 4, 5, 6, 7, 8]:
-                cv2.circle(img, (p.x, p.y), radius, (94, 218, 121), -1)
+                cv2.circle(img, (p.x, p.y), radius, (223, 155, 60), -1)   # 腕
+            elif p.idx in [11, 12]:
+                cv2.circle(img, (p.x, p.y), radius, (1, 240, 255), -1)    # 髋
+            elif p.idx in [13, 14]:
+                cv2.circle(img, (p.x, p.y), radius, (0, 0, 255), -1)      # 膝
+            elif p.idx == 15:
+                cv2.circle(img, (p.x, p.y), radius, (29, 123, 243), -1)   # 左踝
+            elif p.idx == 16:
+                cv2.circle(img, (p.x, p.y), radius, (193, 182, 255), -1)  # 右踝
             else:
                 cv2.circle(img, (p.x, p.y), radius, (0, 255, 0), -1)
 
 
-class BlazePoseInferencer(_BasePoseInferencer):
-    """MediaPipe BlazePose 姿态推理（单人，33 关键点）。"""
-
-    def __init__(self):
-        super().__init__()
-        from .config import SITUP_STATIC_IMAGE_MODE
-        import mediapipe as mp
-
-        self.mp_pose = mp.solutions.pose
-        self.mp_drawing = mp.solutions.drawing_utils
-        self.pose = self.mp_pose.Pose(
-            static_image_mode=SITUP_STATIC_IMAGE_MODE,
-            model_complexity=0,  # 降低复杂度以提升速度（0最快，1中等，2最慢）
-            smooth_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-            enable_segmentation=False,
-        )
-
-    # 循环处理函数
-    def process(self, task: SportTask):
-        img = task.get_frame()
-        config = task.get_config()
-
-        drawing = config.get("drawing", True)
-
-        h = img.shape[0]
-        w = img.shape[1]
-        points: list[PosePoint] = []
-
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # mediapipe需要RGB输入
-        results = self.pose.process(img_rgb)  # mediapipe人体姿态推理
-
-        if results.pose_landmarks:
-            # 检测到人体关键点
-
-            # ========== 圆形标志物检测 ==========
-            if self.marker_enabled:
-                marker_circle = self._detect_marker_circle_bgr(img)
-            else:
-                marker_circle = None
-            if marker_circle is not None:
-                mx, my, mr = marker_circle
-
-                # 替换关键点坐标
-                results.pose_landmarks.landmark[23].x = mx / w
-                results.pose_landmarks.landmark[23].y = my / h
-
-            # 遍历全部33个人体关键点，换算像素坐标存入position
-            for i in range(33):
-                # 归一化坐标转画面像素
-                cx = int(results.pose_landmarks.landmark[i].x * w)
-                cy = int(results.pose_landmarks.landmark[i].y * h)
-                cz = results.pose_landmarks.landmark[i].z  # 关键点深度值
-                points.append(PosePoint(i, cx, cy, cz))
-
-            if drawing:
-                if marker_circle is not None:
-                    # 绘制标志物外圈+圆心点+文字
-                    cv2.circle(img, (mx, my), mr, (0, 0, 255), 3)
-                    cv2.circle(img, (mx, my), 3, (255, 255, 0), -1)
-
-                # 绘制全身骨骼连线
-                self.mp_drawing.draw_landmarks(
-                    img, results.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
-                )
-
-                # 遍历全部33个人体关键点，绘制不同颜色关键点
-                self._draw_keypoints(img, points)
-
-        return {
-            "has_person": results.pose_landmarks is not None,
-            "points": points,
-        }
-
-
-class YoloPoseInferencer(_BasePoseInferencer):
+class Inferencer(_BasePoseInferencer):
     """Ultralytics YOLO Pose 姿态推理（多人，COCO 17 关键点）。
 
-    输出仍按 BlazePose 33 关键点索引组织，供下游 Evaluator 复用；
+    输出 COCO 17 关键点，供下游 Evaluator 直接复用；
     选人策略：按"靠画面中心 + 框面积大"加权得分最高者（不依赖平躺姿态）。
     """
-
-    # YOLO COCO-17 -> BlazePose-33 索引映射
-    COCO_TO_BLAZEPOSE = {
-        0: 0,    # nose
-        1: 2,    # left_eye
-        2: 5,    # right_eye
-        3: 7,    # left_ear
-        4: 8,    # right_ear
-        5: 11,   # left_shoulder
-        6: 12,   # right_shoulder
-        7: 13,   # left_elbow
-        8: 14,   # right_elbow
-        9: 15,   # left_wrist
-        10: 16,  # right_wrist
-        11: 23,  # left_hip
-        12: 24,  # right_hip
-        13: 25,  # left_knee
-        14: 26,  # right_knee
-        15: 27,  # left_ankle
-        16: 28,  # right_ankle
-    }
-
-    # COCO 无对应点、但评测代码会用到的 BlazePose 索引，用最近的点近似填充
-    # blaze_idx <- source_blaze_idx
-    EXTRA_BLAZE_FILLS = {
-        3: 2,    # left_eye_outer <- left_eye
-        6: 5,    # right_eye_outer <- right_eye
-        29: 27,  # left_heel <- left_ankle（评测中作为左脚底/脚踝使用）
-        30: 28,  # right_heel <- right_ankle
-        31: 27,  # left_foot_index <- left_ankle
-        32: 28,  # right_foot_index <- right_ankle
-    }
-
-    # 映射到 BlazePose 索引后的骨架连线（对应 COCO 连线）
-    MAPPED_SKELETON = [
-        (2, 5), (2, 7), (5, 8),                    # 眼-耳
-        (11, 12),                                  # 双肩
-        (11, 13), (13, 15),                        # 左臂
-        (12, 14), (14, 16),                        # 右臂
-        (11, 23), (12, 24), (23, 24),              # 躯干
-        (23, 25), (25, 29),                        # 左腿
-        (24, 26), (26, 30),                        # 右腿
-    ]
 
     # COCO 17 关键点骨架连接（绘制所有人用）
     COCO_SKELETON = [
@@ -248,8 +123,8 @@ class YoloPoseInferencer(_BasePoseInferencer):
     ]
 
     # 选人打分权重：靠画面中心 + 框面积大
-    CENTER_WEIGHT = 0.5
-    AREA_WEIGHT = 0.5
+    CENTER_WEIGHT = 0.9
+    AREA_WEIGHT = 0.1
 
     def __init__(self):
         super().__init__()
@@ -265,26 +140,6 @@ class YoloPoseInferencer(_BasePoseInferencer):
         self.img_sz = SITUP_YOLO_IMG_SZ
         self.box_conf = SITUP_YOLO_BOX_CONF
         self.kpt_conf = SITUP_YOLO_KPT_CONF
-
-    def _map_to_blazepose(self, kpt_xy: np.ndarray) -> list[PosePoint]:
-        """将 COCO 17 像素坐标映射为 BlazePose 33 点格式（z 恒为 0）。"""
-        points = [PosePoint(i, 0, 0, 0.0) for i in range(33)]
-
-        for coco_idx, blaze_idx in self.COCO_TO_BLAZEPOSE.items():
-            points[blaze_idx] = PosePoint(
-                blaze_idx, int(kpt_xy[coco_idx][0]), int(kpt_xy[coco_idx][1]), 0.0
-            )
-
-        # 填充评测用到但 COCO 缺失的近似点
-        for blaze_idx, src_idx in self.EXTRA_BLAZE_FILLS.items():
-            src = points[src_idx]
-            points[blaze_idx] = PosePoint(blaze_idx, src.x, src.y, src.z)
-
-        return points
-
-    def _draw_skeleton(self, img: np.ndarray, points: list[PosePoint]):
-        for a, b in self.MAPPED_SKELETON:
-            cv2.line(img, (points[a].x, points[a].y), (points[b].x, points[b].y), (0, 255, 255), 2, cv2.LINE_AA)
 
     def _select_person(self, r, frame_shape) -> int:
         """按"靠画面中心 + 框面积大"加权选人，返回检测索引。
@@ -351,12 +206,10 @@ class YoloPoseInferencer(_BasePoseInferencer):
             def pt(j, kpt=kpt_xy):
                 return (int(kpt[j][0]), int(kpt[j][1]))
 
+            # 选中者绘制 COCO 骨架连线（彩色关键点由调用方在 points 上绘制）
             for a, b in self.COCO_SKELETON:
                 if kpt_conf[a] > self.kpt_conf and kpt_conf[b] > self.kpt_conf:
                     cv2.line(img, pt(a), pt(b), (0, 255, 255), 2, cv2.LINE_AA)
-            for j in range(len(kpt_xy)):
-                if kpt_conf[j] > self.kpt_conf:
-                    cv2.circle(img, pt(j), 4, (0, 0, 255), -1, cv2.LINE_AA)
 
     # 循环处理函数
     def process(self, task: SportTask):
@@ -380,7 +233,11 @@ class YoloPoseInferencer(_BasePoseInferencer):
             sel = self._select_person(r, img.shape)
             kpt_xy = r.keypoints.xy[sel].cpu().numpy()  # (17, 2) 像素坐标
 
-            points = self._map_to_blazepose(kpt_xy)
+            # 直接构造 COCO 17 关键点
+            points = [
+                PosePoint(i, int(xy[0]), int(xy[1]), 0.0)
+                for i, xy in enumerate(kpt_xy)
+            ]
 
             # ========== 圆形标志物检测 ==========
             marker_circle = self._apply_marker(img, points)
@@ -389,28 +246,15 @@ class YoloPoseInferencer(_BasePoseInferencer):
                 if marker_circle is not None:
                     self._draw_marker(img, marker_circle)
 
-                # 选中者画框+骨架+关键点，其他人只画框
+                # 选中者画框+骨架，其他人只画框
                 self._draw_persons(img, r, sel)
-                # 被评测者：额外绘制映射后的 BlazePose 彩色关键点
-                self._draw_skeleton(img, points)
+                # 被评测者的彩色关键点
                 self._draw_keypoints(img, points)
 
         return {
             "has_person": has_person,
             "points": points,
         }
-
-
-def Inferencer():
-    """按配置创建仰卧起坐姿态推理器。"""
-    from .config import SITUP_POSE_BACKEND
-
-    backend = (SITUP_POSE_BACKEND or "blazepose").lower()
-    if backend == "yolo":
-        return YoloPoseInferencer()
-    if backend == "blazepose":
-        return BlazePoseInferencer()
-    raise ValueError(f"未知的姿态后端: {SITUP_POSE_BACKEND!r}，可选 'blazepose' / 'yolo'")
 
 
 # 评测状态
@@ -452,6 +296,7 @@ class Evaluator:
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
         self.is_knee_moved = False  # 膝盖移动作弊标记
         self.knee_move_alpha = 0.05  # 膝盖移动权重，权重越大，平均值越接近当前帧
+        self.knee_move_threshold = 0.15  # 膝盖移动阈值(1代表视频宽度)
         self.weighted_knee_point = None # 膝盖移动加权平均点
         self.flat_threshold = 20
         self.rise_threshold = 50
@@ -579,20 +424,21 @@ class Evaluator:
         # ================================
 
         # 预设参考地面线两点坐标（左上、右下）
-        x01, y001 = 0, 440
-        x02, y002 = 640, 240
+        h, w = img.shape[:2]
+        x01, y001 = 0, h
+        x02, y002 = w, h // 2
 
         # k0:拟合地面基线斜率 b0:拟合基线截距
         k0, b0 = 0, 0
         # k1：预设参考地面直线斜率
         k1 = (y001 - y002) / (x01 - x02)
-        x3 = 320  # 参考线中点X
+        x3 = w // 2  # 参考线中点X
 
-        # 左肩(11)、左脚踝(29)像素坐标，用于拟合地面基准线
-        x1 = int(points[11].x)
-        y1 = int(points[11].y)
-        x2 = int(points[29].x)
-        y2 = int(points[29].y)
+        # 左肩(5)、左脚踝(15)像素坐标，用于拟合地面基准线
+        x1 = int(points[5].x)
+        y1 = int(points[5].y)
+        x2 = int(points[15].x)
+        y2 = int(points[15].y)
 
         # 未正式测试时，绘制绿色预设参考地面线+中点标记
         if self.state == State.WAITING:
@@ -627,44 +473,44 @@ class Evaluator:
 
         # ========== 计算躯干与地面夹角 body_ground_angle ==========
         A, B = [0.0] * 3, [0.0] * 3
-        A[0] = points[11].x  # 左肩X
-        A[1] = points[23].x  # 脚底X
-        A[2] = 640
-        B[0] = points[11].y  # 左肩Y
-        B[1] = points[23].y  # 脚底Y
-        B[2] = points[23].y
+        A[0] = points[5].x   # 左肩X
+        A[1] = points[11].x  # 左髋X（脚底侧）
+        A[2] = w
+        B[0] = points[5].y   # 左肩Y
+        B[1] = points[11].y  # 左髋Y
+        B[2] = points[11].y
         body_ground_angle = self.calculate_angle(A, B)
         self.wucha = 8  # 固定角度补偿误差
         self.obsY3.append(body_ground_angle - abs((math.atan(k0)) / math.pi * 180))
 
         # ========== 计算右手臂肩肘夹角 shoulder_elbow_angle ==========
-        A[0] = points[16].x  # 右腕X
-        A[1] = points[14].x  # 右肘X
-        A[2] = points[12].x  # 右肩X
-        B[0] = points[16].y  # 右腕Y
-        B[1] = points[14].y  # 右肘Y
-        B[2] = points[12].y  # 右肩Y
+        A[0] = points[10].x  # 右腕X
+        A[1] = points[8].x   # 右肘X
+        A[2] = points[6].x   # 右肩X
+        B[0] = points[10].y  # 右腕Y
+        B[1] = points[8].y   # 右肘Y
+        B[2] = points[6].y   # 右肩Y
         shoulder_elbow_angle = self.calculate_angle(A, B)
 
         # ========== 计算左手臂肩肘夹角 shoulder_elbow_angle2 ==========
-        A[0] = points[15].x  # 左腕X
-        A[1] = points[13].x  # 左肘X
-        A[2] = points[11].x  # 左肩X
-        B[0] = points[15].y  # 左腕Y
-        B[1] = points[13].y  # 左肘Y
-        B[2] = points[11].y  # 左肩Y
+        A[0] = points[9].x   # 左腕X
+        A[1] = points[7].x   # 左肘X
+        A[2] = points[5].x   # 左肩X
+        B[0] = points[9].y   # 左腕Y
+        B[1] = points[7].y   # 左肘Y
+        B[2] = points[5].y   # 左肩Y
         shoulder_elbow_angle2 = self.calculate_angle(A, B)
 
         self.obsY2.append(shoulder_elbow_angle)
         self.obsY4.append(shoulder_elbow_angle2)
 
         # ========== 脚底地面基准夹角 base_angle ==========
-        A[0] = points[23].x # 左臀部X
-        A[1] = points[29].x # 左脚底X
-        A[2] = 640
-        B[0] = points[23].y # 左臀部Y
-        B[1] = points[29].y # 左脚底Y
-        B[2] = points[29].y # 左脚底Y
+        A[0] = points[11].x  # 左臀部X
+        A[1] = points[15].x  # 左脚踝X
+        A[2] = w
+        B[0] = points[11].y  # 左臀部Y
+        B[1] = points[15].y  # 左脚踝Y
+        B[2] = points[15].y  # 左脚踝Y
         base_angle = self.calculate_angle(A, B)
 
         self.obsY5.append(body_ground_angle - abs((math.atan(k1)) / math.pi * 180))
@@ -672,17 +518,17 @@ class Evaluator:
         # ========== 环境合格判定逻辑：肩、头、脚关键点在地面线下方 ==========
         if self.state == State.WAITING:
             if (
-                points[29].y <= k0 * points[29].x + b0 + 15
-                and points[23].y <= k0 * points[23].x + b0 + 15
+                points[15].y <= k0 * points[15].x + b0 + 15
                 and points[11].y <= k0 * points[11].x + b0 + 15
+                and points[5].y <= k0 * points[5].x + b0 + 15
             ):
-                if points[3].y > 0 and points[3].x > 0:
+                if points[1].y > 0 and points[1].x > 0:
                     # 双脚在画面内，累计合格帧
                     if (
-                        points[31].y <= 480
-                        and points[32].y <= 480
-                        and points[31].x <= 640
-                        and points[32].x <= 640
+                        points[15].y <= h
+                        and points[16].y <= h
+                        and points[15].x <= w
+                        and points[16].x <= w
                     ):
                         self.env_ok_count += 1
                         # 连续10帧环境正常，标记环境合格env_ifok=1
@@ -779,12 +625,12 @@ class Evaluator:
 
             # 作弊2：人体关键点大面积出画面，判定替考换人
             if (
-                min(points[2].y, points[5].y) < 0
-                or min(points[7].x, points[8].x) < 0
-                or max(points[7].x, points[8].x) > 640
-                or max(points[25].y, points[26].y) > 480
-                or min(points[25].x, points[26].x) < 0
-                or max(points[25].x, points[26].x) > 640
+                min(points[1].y, points[2].y) < 0
+                or min(points[3].x, points[4].x) < 0
+                or max(points[3].x, points[4].x) > w
+                or max(points[13].y, points[14].y) > h
+                or min(points[13].x, points[14].x) < 0
+                or max(points[13].x, points[14].x) > w
             ):
                 self.is_out_of_bounds = True
 
@@ -808,16 +654,16 @@ class Evaluator:
 
             # 作弊5：腿部移动/其他人抢走关键点
             if self.weighted_knee_point == None:
-                self.weighted_knee_point = points[25]
+                self.weighted_knee_point = points[13]
 
             if (
-                self.weighted_knee_point.x - points[25].x > 60
-                or self.weighted_knee_point.y - points[25].y > 60
+                self.weighted_knee_point.x - points[13].x > w * self.knee_move_threshold
+                or self.weighted_knee_point.y - points[13].y > w * self.knee_move_threshold
             ):
                 self.is_knee_moved = True
 
-            self.weighted_knee_point.x = self.weighted_knee_point.x * (1 - self.knee_move_alpha) + points[25].x * self.knee_move_alpha
-            self.weighted_knee_point.y = self.weighted_knee_point.y * (1 - self.knee_move_alpha) + points[25].y * self.knee_move_alpha
+            self.weighted_knee_point.x = self.weighted_knee_point.x * (1 - self.knee_move_alpha) + points[13].x * self.knee_move_alpha
+            self.weighted_knee_point.y = self.weighted_knee_point.y * (1 - self.knee_move_alpha) + points[13].y * self.knee_move_alpha
 
             # 平躺判定逻辑
             if (
@@ -862,7 +708,7 @@ class Evaluator:
             if self.is_out_of_bounds:
                 hints.append("测试者出画面")
             if self.is_knee_moved:
-                hints.append("膝盖移动过多")
+                hints.append("测试者大幅移动")
 
             # ========== 作弊状态绘制 ==========
             if drawing:
@@ -880,7 +726,7 @@ class Evaluator:
                     img = self.img_put_text(img, "测试者出画面", 25, hint_y, (255, 0, 255))
                     hint_y += 25
                 if self.is_knee_moved:
-                    img = self.img_put_text(img, "膝盖移动过多", 25, hint_y, (255, 0, 255))
+                    img = self.img_put_text(img, "测试者大幅移动", 25, hint_y, (255, 0, 255))
                     hint_y += 25
 
         # ========== 结束阶段主逻辑 ==========
