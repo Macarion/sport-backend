@@ -148,7 +148,7 @@ class Inferencer(_BasePoseInferencer):
         不依赖平躺姿态，测试开始前也可稳定选人。
         """
         h, w = frame_shape[:2]
-        cx0, cy0 = w / 2.0, h / 2.0
+        cx0, cy0 = w / 2.0, h * 2 / 3.0
         max_dist = math.hypot(cx0, cy0)
 
         boxes = r.boxes.xyxy.cpu().numpy()
@@ -219,6 +219,8 @@ class Inferencer(_BasePoseInferencer):
         drawing = config.get("drawing", True)
 
         points: list[PosePoint] = []
+        person_boxes: list[list[float]] = []
+        selected_idx = -1
 
         # YOLO 推理直接使用 BGR 帧
         results = self.model.predict(
@@ -228,9 +230,14 @@ class Inferencer(_BasePoseInferencer):
 
         has_person = r.keypoints is not None and len(r.keypoints) > 0
 
+        if r.boxes is not None and len(r.boxes) > 0:
+            for bx in r.boxes.xyxy.cpu().numpy():
+                person_boxes.append([float(bx[0]), float(bx[1]), float(bx[2]), float(bx[3])])
+
         if has_person:
             # 选人：画面中心距离 + 框面积加权
             sel = self._select_person(r, img.shape)
+            selected_idx = sel
             kpt_xy = r.keypoints.xy[sel].cpu().numpy()  # (17, 2) 像素坐标
 
             # 直接构造 COCO 17 关键点
@@ -254,6 +261,8 @@ class Inferencer(_BasePoseInferencer):
         return {
             "has_person": has_person,
             "points": points,
+            "person_boxes": person_boxes,
+            "selected_idx": selected_idx,
         }
 
 
@@ -295,9 +304,14 @@ class Evaluator:
         self.is_flat_insufficient = False  # 肩背未着地作弊标记
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
         self.is_knee_moved = False  # 膝盖移动作弊标记
+        self.is_assist_cheat = False  # 头后方有人助力作弊标记
         self.knee_move_alpha = 0.05  # 膝盖移动权重，权重越大，平均值越接近当前帧
         self.knee_move_threshold = 0.15  # 膝盖移动阈值(1代表视频宽度)
         self.weighted_knee_point = None # 膝盖移动加权平均点
+        self.assist_count = 0  # 头后方有人驻留的连续帧计数
+        self.assist_hold_frames = 75  # 驻留多少帧判定助力作弊
+        self.assist_behind_depth = 0.25  # 头后方检测深度(相对画面宽)
+        self.assist_lateral_width = 0.15  # 头后方检测侧向容差(相对画面宽)
         self.flat_threshold = 20
         self.rise_threshold = 50
         self.last_flat_angle = 180
@@ -328,6 +342,40 @@ class Evaluator:
         else:
             angle = abs(math.degrees(math.acos((a + c - b) / math.sqrt(4 * a * c))))
         return angle
+
+    def _has_assist_behind_head(self, points, person_boxes, selected_idx, w) -> bool:
+        """检测头部后方是否出现其他人（疑似推背助力）。
+
+        以双肩中点→鼻的方向为身体朝头方向，头前方一定深度、侧向一定容差内
+        出现非被测者的框即视为头后方有人。
+        """
+        if not person_boxes:
+            return False
+
+        head_x, head_y = points[0].x, points[0].y
+        shoulder_cx = (points[5].x + points[6].x) / 2.0
+        shoulder_cy = (points[5].y + points[6].y) / 2.0
+        dx, dy = head_x - shoulder_cx, head_y - shoulder_cy
+        norm = math.hypot(dx, dy)
+        if norm < 1e-6:
+            return False
+        ux, uy = dx / norm, dy / norm
+
+        behind_max = w * self.assist_behind_depth
+        lateral_max = w * self.assist_lateral_width
+
+        for i, box in enumerate(person_boxes):
+            if i == selected_idx:
+                continue
+            bcx = (box[0] + box[2]) / 2.0
+            bcy = (box[1] + box[3]) / 2.0
+            # 沿头方向投影距离：>0 表示在头部朝前侧（即头后方）
+            proj = (bcx - head_x) * ux + (bcy - head_y) * uy
+            # 垂直于头方向的侧向偏移
+            lat = abs((bcx - head_x) * (-uy) + (bcy - head_y) * ux)
+            if 0 < proj <= behind_max and lat <= lateral_max:
+                return True
+        return False
 
 
     def img_put_text(
@@ -406,6 +454,8 @@ class Evaluator:
 
         points: list[PosePoint] = data["points"]
         has_person = data["has_person"]
+        person_boxes = data.get("person_boxes") or []
+        selected_idx = data.get("selected_idx", -1)
         drawing = config.get("drawing", True)
 
         # 丢弃乱序到达的无效帧
@@ -665,6 +715,15 @@ class Evaluator:
             self.weighted_knee_point.x = self.weighted_knee_point.x * (1 - self.knee_move_alpha) + points[13].x * self.knee_move_alpha
             self.weighted_knee_point.y = self.weighted_knee_point.y * (1 - self.knee_move_alpha) + points[13].y * self.knee_move_alpha
 
+            # 作弊6：头部后方有人长时间驻留，判定推背助力
+            if self._has_assist_behind_head(points, person_boxes, selected_idx, w):
+                self.assist_count += 1
+            else:
+                self.assist_count = 0
+
+            if self.assist_count >= self.assist_hold_frames:
+                self.is_assist_cheat = True
+
             # 平躺判定逻辑
             if (
                 self.state == State.READY
@@ -686,7 +745,7 @@ class Evaluator:
                     is_new_rise = True
 
             # ========== 有效计数num累加逻辑 ==========
-            if self.is_out_of_bounds or self.is_knee_moved:
+            if self.is_out_of_bounds or self.is_knee_moved or self.is_assist_cheat:
                 self.state = State.FINISHED
                 is_new_rise = False
 
@@ -709,6 +768,8 @@ class Evaluator:
                 hints.append("测试者出画面")
             if self.is_knee_moved:
                 hints.append("测试者大幅移动")
+            if self.is_assist_cheat:
+                hints.append("疑似助力作弊")
 
             # ========== 作弊状态绘制 ==========
             if drawing:
@@ -728,6 +789,9 @@ class Evaluator:
                 if self.is_knee_moved:
                     img = self.img_put_text(img, "测试者大幅移动", 25, hint_y, (255, 0, 255))
                     hint_y += 25
+                if self.is_assist_cheat:
+                    img = self.img_put_text(img, "疑似助力作弊", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
 
         # ========== 结束阶段主逻辑 ==========
         if self.state == State.FINISHED:
@@ -741,12 +805,14 @@ class Evaluator:
             "score": self.num,
             "angle": body_ground_angle2,
             "hints": hints,
+            "is_waiting_for_flat": self.env_ifok == -4,
             "is_new_rise": is_new_rise,
             "is_arm_force_cheat": self.is_arm_force_cheat,
             "is_out_of_bounds": self.is_out_of_bounds,
             "is_flat_insufficient": self.is_flat_insufficient,
             "is_rise_insufficient": self.is_rise_insufficient,
             "is_knee_move": self.is_knee_moved,
+            "is_assist_cheat": self.is_assist_cheat,
             "timestamp": int(round(time.time() * 1000)),
         }
 
