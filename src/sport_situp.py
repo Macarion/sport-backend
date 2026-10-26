@@ -457,6 +457,7 @@ class Evaluator:
         person_boxes = data.get("person_boxes") or []
         selected_idx = data.get("selected_idx", -1)
         drawing = config.get("drawing", True)
+        start_count = config.get("start", False)
 
         # 丢弃乱序到达的无效帧
         if self.frame_id >= frame_id:
@@ -753,7 +754,7 @@ class Evaluator:
                 self.state = State.WAIT_FLAT
                 is_new_rise = False
 
-            if is_new_rise:
+            if is_new_rise and start_count:
                 self.num += 1
 
         if self.state >= State.READY:
