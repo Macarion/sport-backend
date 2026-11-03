@@ -45,6 +45,10 @@ class _Session:
         self.finalized = False
         self.stopping_at = None
         self.last_active = time.time()
+        self.push_ok = 0
+        self.push_drop = 0
+        self.res_ok = 0
+        self._rate_t = time.time()
         self.pump = None               # asyncio.Task，创建于 daphne 事件循环
 
     def spawn(self):
@@ -63,7 +67,7 @@ class UserManager:
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
-        self._sessions = {}
+        self._sessions: dict[str, _Session] = {}
         self._consumers = {}
         self._loop = None
 
@@ -189,7 +193,9 @@ class UserManager:
 
         with session.lock:
             if not session.free_slots:
-                return False        # 4 槽全在途：丢帧（loading 期 / 背压）
+                session.push_drop += 1   # 4 槽全在途：丢帧（loading 期 / 背压）
+                self._rate(session)
+                return False
             slot = session.free_slots.pop(0)
             session.slot_shapes[slot] = frame.shape
             frame_id = session.frame_id
@@ -204,13 +210,27 @@ class UserManager:
             with session.lock:
                 session.slot_shapes.pop(slot, None)
                 session.free_slots.append(slot)
+            session.push_drop += 1
+            self._rate(session)
             return False
 
         task = SportTask(uid, frame_id, session.sport_type,
                          slot, frame.shape, session.config)
         session.in_q.put(task.to_bytes())
         session.last_active = time.time()
+        session.push_ok += 1
+        self._rate(session)
         return True
+
+    @staticmethod
+    def _rate(session):
+        """每 5 秒汇总一次帧入队/丢弃/结果统计（运维可见性）。"""
+        now = time.time()
+        if now - session._rate_t >= 5:
+            log.info('帧统计 uid=%s: 入队=%d 丢弃=%d 结果=%d 空结果=%d (5s窗口)',
+                     session.uid, session.push_ok, session.push_drop, session.res_ok,
+                     getattr(session, 'res_none', 0))
+            session._rate_t = now
 
     # ---------- 结果出（daphne 事件循环上的每会话 pump）----------
 
@@ -226,7 +246,7 @@ class UserManager:
     def _get_msg(session):
         return session.out_q.get(timeout=POLL_INTERVAL)
 
-    async def _pump(self, session):
+    async def _pump(self, session: _Session):
         loop = asyncio.get_event_loop()
         uid = session.uid
         log.info('结果轮询启动: uid=%s', uid)
@@ -282,12 +302,14 @@ class UserManager:
                     log.error('发送 test_end 失败: uid=%s, err=%s', uid, e)
             log.info('会话结束: uid=%s', uid)
 
-    async def _on_result(self, session, msg, loop):
+    async def _on_result(self, session: _Session, msg, loop):
+        session.res_ok += 1
+        self._rate(session)
         slot = msg.get('slot')
         if slot:
             with session.lock:
                 shape = session.slot_shapes.pop(slot, None)
-                if slot in session.free_slots:
+                if slot not in session.free_slots:
                     session.free_slots.append(slot)   # 槽归还（先于投递，尽快复用）
             frame = await loop.run_in_executor(None, self._read_slot, slot, shape)
             consumer = self._consumers.get(session.uid)
@@ -295,6 +317,8 @@ class UserManager:
                 consumer.output_track.push_frame(frame)
 
         data = msg.get('data')
+        if data is None:
+            session.res_none = getattr(session, 'res_none', 0) + 1
         consumer = self._consumers.get(session.uid)
         if data is not None and consumer is not None:
             await consumer.channel_layer.send(consumer.channel_name,
