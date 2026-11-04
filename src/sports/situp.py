@@ -310,8 +310,8 @@ class Evaluator:
         self.weighted_knee_point = None # 膝盖移动加权平均点
         self.assist_count = 0  # 头后方有人驻留的连续帧计数
         self.assist_hold_frames = 75  # 驻留多少帧判定助力作弊
-        self.assist_behind_depth = 0.25  # 头后方检测深度(相对画面宽)
-        self.assist_lateral_width = 0.15  # 头后方检测侧向容差(相对画面宽)
+        self.assist_behind_dx = 0.25  # 头后方横轴检测范围(相对画面宽,沿脚→头方向)
+        self.assist_band_dy = 0.15  # 纵坐标带容差(相对画面宽,与被测者框中心y比)
         self.flat_threshold = 20
         self.rise_threshold = 50
         self.last_flat_angle = 180
@@ -346,34 +346,37 @@ class Evaluator:
     def _has_assist_behind_head(self, points, person_boxes, selected_idx, w) -> bool:
         """检测头部后方是否出现其他人（疑似推背助力）。
 
-        以双肩中点→鼻的方向为身体朝头方向，头前方一定深度、侧向一定容差内
-        出现非被测者的框即视为头后方有人。
+        脚→头横轴几何：dir_x = sign(head_x - heal_x)，头后方横轴范围(assist_behind_dx)
+        内、且框中心 y 落在被测者框中心 y 容差带(assist_band_dy)内的非被测者框即判为
+        后方有人。纯横纵轴判定，不用身体方向投影——起身时方向向量转竖直会把上方行人
+        误判为头后方。任何参考量缺失（heal_x 未缓存、方向退化、被测者框越界）一律
+        返回 False：无法判定时不误报。
         """
-        if not person_boxes:
+        if not person_boxes or not (0 <= selected_idx < len(person_boxes)):
             return False
+        if self.heal_x == 0:
+            return False  # 脚踝参考点未缓存，无法定方向
 
-        head_x, head_y = points[0].x, points[0].y
-        shoulder_cx = (points[5].x + points[6].x) / 2.0
-        shoulder_cy = (points[5].y + points[6].y) / 2.0
-        dx, dy = head_x - shoulder_cx, head_y - shoulder_cy
-        norm = math.hypot(dx, dy)
-        if norm < 1e-6:
-            return False
-        ux, uy = dx / norm, dy / norm
+        head_x = points[0].x
+        if head_x == self.heal_x:
+            return False  # 方向退化为 0
+        dir_x = 1 if head_x > self.heal_x else -1  # 脚→头横轴方向
 
-        behind_max = w * self.assist_behind_depth
-        lateral_max = w * self.assist_lateral_width
+        behind_max = w * self.assist_behind_dx
+        band_max = w * self.assist_band_dy
+        subj = person_boxes[selected_idx]
+        subj_cy = (subj[1] + subj[3]) / 2.0
 
         for i, box in enumerate(person_boxes):
             if i == selected_idx:
                 continue
             bcx = (box[0] + box[2]) / 2.0
             bcy = (box[1] + box[3]) / 2.0
-            # 沿头方向投影距离：>0 表示在头部朝前侧（即头后方）
-            proj = (bcx - head_x) * ux + (bcy - head_y) * uy
-            # 垂直于头方向的侧向偏移
-            lat = abs((bcx - head_x) * (-uy) + (bcy - head_y) * ux)
-            if 0 < proj <= behind_max and lat <= lateral_max:
+            # 横轴：在头部后方，0 < 横向距离 ≤ behind_max
+            if not (0 < (bcx - head_x) * dir_x <= behind_max):
+                continue
+            # 纵轴：与被测者框中心的纵坐标带重合
+            if abs(bcy - subj_cy) <= band_max:
                 return True
         return False
 
@@ -763,6 +766,8 @@ class Evaluator:
                 hints.append("测试者出画面")
             if self.is_knee_moved:
                 hints.append("测试者大幅移动")
+            if 0 < self.assist_count < self.assist_hold_frames:
+                hints.append("后方有人")  # 驻留计数未满 75 帧的预警
             if self.is_assist_cheat:
                 hints.append("疑似助力作弊")
 
@@ -783,6 +788,9 @@ class Evaluator:
                     hint_y += 25
                 if self.is_knee_moved:
                     img = self.img_put_text(img, "测试者大幅移动", 25, hint_y, (255, 0, 255))
+                    hint_y += 25
+                if 0 < self.assist_count < self.assist_hold_frames:
+                    img = self.img_put_text(img, "后方有人", 25, hint_y, (0, 255, 255))
                     hint_y += 25
                 if self.is_assist_cheat:
                     img = self.img_put_text(img, "疑似助力作弊", 25, hint_y, (255, 0, 255))

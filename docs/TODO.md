@@ -110,7 +110,7 @@
 4. 注入 worker 异常/杀进程：下次自动 spawn 新的；
 5. `shutdown_all` 后无残留进程。
 
-## 第 5 步：助力检测修正（小、独立）
+## 第 5 步：助力检测修正（小、独立） ✅ 已完成（2026-11-04）
 
 改动（`sports/situp.py:350-383 _has_assist_behind_head`）：
 - 方向：`dir_x = sign(head_x - heal_x)`（脚→头横轴；`heal_x` 即脚踝参考点，`situp.py:507` 注释"肩、脚踝"已核实）。`heal_x` 未缓存（=0）时直接返回 False（无法判定，不误报）。
@@ -121,6 +121,12 @@
 注意：**75 帧判定与 `is_assist_cheat` 置位逻辑一行不动**（用户确认沿用原判定，本步只换几何 + 加显示）。
 
 验证：合成 `person_boxes` 脚本跑该函数（起身姿态的上方人不触发、头后同高度人触发）；hint 出现→75 帧后 `is_assist_cheat` 置位的实拍冒烟。
+
+**完成记录**：
+- 几何重写按方案落位：`dir_x = sign(head_x − heal_x)`；`heal_x==0`（未缓存）、`head_x==heal_x`（方向退化）、`selected_idx` 越界 → 一律 False（无法判定不误报，后两项为方案外补充守卫）。横轴 `0 < (bcx−head_x)·dir_x ≤ w·assist_behind_dx`；纵轴 `|bcy − 被测者框中心y| ≤ w·assist_band_dy`（被测者框 = `person_boxes[selected_idx]`）。
+- 参数改名（用户追加要求，横纵轴语义）：`assist_behind_depth → assist_behind_dx`、`assist_lateral_width → assist_band_dy`；全仓旧名零残留（`GLOSSARY.md` 助力词条本就描述"头部后方、纵坐标相近"，无需改）。
+- 新增 hint + 绘制「后方有人」：`0 < assist_count < assist_hold_frames` 时显示（绘制黄色 `(0,255,255)`，与确认态品红区分）；**75 帧判定与 `is_assist_cheat` 置位一行未动**。
+- 验证：按用户要求仅编译（`py_compile` 过），原计划的几何脚本与实拍冒烟本步免做。
 
 ## 第 6 步：前端预览双条件切换（5 秒断流回退：暂缓）
 
