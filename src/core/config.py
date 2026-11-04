@@ -20,6 +20,7 @@ FACE_DB_PATH = BACKEND_ROOT / 'data' / 'faces.db'
 # ---------- 进程与会话 ----------
 IDLE_TIMEOUT = 60                # 会话空闲销毁与 worker 驻留同口径（秒）
 DAPHNE_PORT = int(os.environ.get('DAPHNE_PORT', '8090'))
+PREWARM_ENABLED = False          # 开机预热子进程：默认关（模型打热文件缓存，有效性存疑）
 
 # ---------- 日志 ----------
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')

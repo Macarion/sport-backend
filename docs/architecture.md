@@ -5,10 +5,10 @@
 
 ## 1. 进程拓扑
 
-- **唯一入口 `src/main.py`**（`start.bat` → `python src/main.py`，ADR-0002）：`chdir` 到 `sport-backend/` 根 → spawn 一次性预热进程（注册表全解析 + 逐项加载模型打热文件缓存）→ 程序化托管 daphne（`DAPHNE_PORT`，默认 8090）→ atexit/SIGTERM 收口 `user_manager.shutdown_all()`。
+- **唯一入口 `src/main.py`**（`start.bat` → `python src/main.py`，ADR-0002）：`chdir` 到 `sport-backend/` 根 → 按 `PREWARM_ENABLED`（`core/config.py`，**默认关**）决定是否 spawn 一次性预热进程（注册表全解析 + 逐项加载模型打热文件缓存）→ 程序化托管 daphne（`DAPHNE_PORT`，默认 8090）→ atexit/SIGTERM 收口 `user_manager.shutdown_all()`。
 - **web 进程**（daphne，单进程，Django + channels）：Django 应用平铺在 `src/`（`manage.py`、`backend/`、`api/`）。`sys.path` 根 = `src/`，全仓顶层绝对导入（`core.*` / `api.*` / `sports.*`），无 `from src.` 包结构。
 - **用户进程**（每会话 spawn 或从驻留池复用，daemon）：`worker/run_user_worker.py`，一个进程承载一个体测项目的推理 + 评测全链路。
-- **预热进程**：一次性，跑完即退。
+- **预热进程**：一次性，跑完即退；**默认不启动**（`PREWARM_ENABLED=False`，置 True 才 spawn，关闭时模型由首个会话懒加载）。
 - **人脸服务进程**：尚未存在，第 7 步引入（ADR-0004：独立预载 + 单任务无排队）。
 
 ## 2. 会话与驻留池（ADR-0003，已完成）
@@ -50,7 +50,7 @@
 - `sport-backend/data/faces.db`：人脸库（运行时可写，不进 vendor；`init_sdk(db_path=…)` 由 config 传入）。
 - 报告读写同处 `src/report_pdf/`（`REPORT_DIR` 锚定，修过"官方入口读写分叉"）；PDF 生成器字体注册在 **Django import 期**走 `FONT_DIR`。
 - `onnxruntime==1.31.1` 已入 `requirements.txt`（face_sdk 硬依赖）。
-- **启动必须走 `main.py` 入口**（chdir + 预热 + 托管）；`start_me.bat` daphne 直启已废弃；`start_with_env.bat` 已删（死脚本）。
+- **启动必须走 `main.py` 入口**（chdir + 托管，预热可选）；`start_me.bat` daphne 直启已废弃；`start_with_env.bat` 已删（死脚本）。
 
 ## 7. 关键注意事项
 

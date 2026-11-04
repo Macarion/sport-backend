@@ -10,7 +10,7 @@ start.bat        :: 等价于 python src/main.py
 ```
 
 - daphne/Django 监听 `8090`（`DAPHNE_PORT` 可覆盖）。
-- 启动即预热：spawn 一次性进程加载 situp/pullup 模型打热文件缓存（日志带"预热"字样）。
+- 预热开关：`core/config.py` 的 `PREWARM_ENABLED`（**默认 `False`**），置 `True` 才 spawn 一次性进程加载 situp/pullup 模型打热文件缓存（日志带"预热"字样）；关闭时模型由首个会话懒加载。
 - Ctrl+C / SIGTERM 退出时自动销毁全部用户会话与共享内存槽。
 
 ## 目录结构

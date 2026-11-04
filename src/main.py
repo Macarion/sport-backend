@@ -8,7 +8,7 @@ import os
 import signal
 import sys
 import time
-from core.config import BACKEND_ROOT, DAPHNE_PORT
+from core.config import BACKEND_ROOT, DAPHNE_PORT, PREWARM_ENABLED
 from core.log import get_logger
 
 log = get_logger('main')
@@ -53,9 +53,12 @@ def main():
     atexit.register(_cleanup)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
 
-    prewarm_proc = mp.Process(target=_prewarm, daemon=True)
-    prewarm_proc.start()
-    log.info('预热进程已启动: PID=%d（日志带“预热”字样）', prewarm_proc.pid)
+    if PREWARM_ENABLED:
+        prewarm_proc = mp.Process(target=_prewarm, daemon=True)
+        prewarm_proc.start()
+        log.info('预热进程已启动: PID=%d（日志带“预热”字样）', prewarm_proc.pid)
+    else:
+        log.info('预热已关闭（config.PREWARM_ENABLED=False），模型由首个会话懒加载')
 
     from daphne.cli import CommandLineInterface
     cli = CommandLineInterface()

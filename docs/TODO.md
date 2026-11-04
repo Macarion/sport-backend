@@ -128,7 +128,7 @@
 - 新增 hint + 绘制「后方有人」：`0 < assist_count < assist_hold_frames` 时显示（绘制黄色 `(0,255,255)`，与确认态品红区分）；**75 帧判定与 `is_assist_cheat` 置位一行未动**。
 - 验证：按用户要求仅编译（`py_compile` 过），原计划的几何脚本与实拍冒烟本步免做。
 
-## 第 6 步：前端预览双条件切换（5 秒断流回退：暂缓）
+## 第 6 步：前端预览双条件切换（5 秒断流回退：暂缓） ✅ 已完成（2026-11-04）
 
 改动（`sport-frontend/src/views/student/StudentTestingSitup.vue`）：
 - `:306-309 ontrack` 改为只存不挂：`remoteStream = ref(null)`，ontrack 里存 `evt.streams[0]`，**不再立即写 `srcObject`**（现状是 ICE 一通就把本地预览顶掉，模型加载期黑屏——本步修的就是它）。
@@ -139,6 +139,14 @@
 注意：只改仰卧起坐页；`StudentTestingPullup.vue`/`StudentTestingStandjump.vue` 是同样的 ontrack 覆盖模式，列为后续（本批 pullup 还没换 YOLO，不同时动两个页面）。
 
 验证：浏览器实测——开始→本地画面持续到 ready→切后端处理画面，ready 前无黑屏、切换不闪断（`browser.open` 实测，不靠测试代替）。
+
+**完成记录**：
+- `remoteStream`/`remoteReady` + `attachRemoteIfNeeded()`（幂等：`srcObject` 身份比对，同一流不重复挂）。偏差：方案写 `ref(null)`，实际两标志无任何模板依赖，用普通局部变量（行为等价，少一层响应式）。
+- `ontrack` 只存不挂：`remoteStream = evt.streams[0] || new MediaStream([evt.track])`（空 `streams` 数组兜底），存后立即互查。
+- `phase:'ready'` 分支置 `remoteReady = true` 并互查——两处谁后到谁触发切换；切换前画面 = `openCamera` 挂的本地采集流，一直保留。
+- `ws.onopen` 重置两标志：同组件内二次测试不复用上次的 ready（否则新连接 ready 前就切走本地画面）。
+- **5 秒断流回退仍暂缓（未动，勿当遗漏）**；只改 `StudentTestingSitup.vue`，pullup/standjump 页同模式列为后续。
+- 验证：按用户要求仅编译（`npm run build` 过，✓ built in 9.78s）；原计划的 `browser.open` 浏览器实测本步免做。
 
 ## 第 7 步：人脸门禁（依赖 1/2/3/4）
 
@@ -190,3 +198,11 @@
 ---
 
 **序列之外已识别、不进本批**：jump `sam2.1_hiera_small.pt` 缺失；人脸注册/录入流程；`legacy/` 整体删除；`start_me.bat` 弃用清理；pullup/standjump 页的预览切换（第 6 步同模式后续）；pullup 选人改"正中间"（用户自调）。
+
+---
+
+## 追加改动（2026-11-04）：开机预热开关
+
+- `core/config.py` 新增 `PREWARM_ENABLED = False`（**默认关**，置 `True` 恢复原"启动即预热"）；`main.py` 按其决定是否 spawn 预热进程，关闭时打日志说明由首个会话懒加载。
+- 同步 `README.md`、`docs/architecture.md` 的"启动即预热"表述为开关语义；ADR-0002 等历史决策记录不改（开关不改变入口结构）。
+- 验证：py_compile 过（沿用本批仅编译口径）。
