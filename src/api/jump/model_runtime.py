@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
+from core.config import VENDOR_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -81,7 +83,7 @@ def resolve_jump_device() -> str:
 PACKAGE_ROOT = Path(__file__).resolve().parent
 API_ROOT = PACKAGE_ROOT.parent
 BACKEND_ROOT = API_ROOT.parent
-VENDOR_ROOT = BACKEND_ROOT / "vendor"
+VENDOR_ROOT = VENDOR_DIR  # 资产区统一在 sport-backend/vendor（由 core/config 锚定）
 PROJECT_ROOT = BACKEND_ROOT
 WCX_DIR = VENDOR_ROOT / "wcx"
 ARUCOTEST_DIR = WCX_DIR / "arucotest"

@@ -16,11 +16,12 @@ from kivy.core.text import LabelBase
 from matplotlib.font_manager import FontProperties
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.legends import Legend
+from core.config import FONT_DIR, REPORT_DIR
 from .student_bulk import get_student_info_for_report
 
-LabelBase.register(name='Font_HanZi', fn_regular='./msyh.TTF')
-LabelBase.register(name='Font_HanZi_bd', fn_regular='./msyhbd.ttf')
-Font_HanZi_bd = FontProperties(fname="./msyhbd.ttf")
+LabelBase.register(name='Font_HanZi', fn_regular=str(FONT_DIR / 'msyh.ttf'))
+LabelBase.register(name='Font_HanZi_bd', fn_regular=str(FONT_DIR / 'msyhbd.ttf'))
+Font_HanZi_bd = FontProperties(fname=str(FONT_DIR / 'msyhbd.ttf'))
 
 def generate_id(existing_codes, length=12):
     while True:
@@ -34,8 +35,8 @@ def generate_id(existing_codes, length=12):
 class PDFGenerator:
     def __init__(self):
         # 注册宋体字体
-        pdfmetrics.registerFont(TTFont('Font_HanZi', 'msyh.TTF'))
-        pdfmetrics.registerFont(TTFont('Font_HanZi_bd', 'msyhbd.TTF'))
+        pdfmetrics.registerFont(TTFont('Font_HanZi', str(FONT_DIR / 'msyh.ttf')))
+        pdfmetrics.registerFont(TTFont('Font_HanZi_bd', str(FONT_DIR / 'msyhbd.ttf')))
         pdfmetrics.registerFontFamily('STHanZi', normal='Font_HanZi', italic=None, boldItalic='Font_HanZi_bd')
 
         # 创建一个新的PDF writer对象
@@ -305,7 +306,7 @@ class PDFGenerator:
         ax.plot(angles, values, linewidth=1, linestyle='solid')
         ax.fill(angles, values, facecolor='#F08080', edgecolor='#000000')
 
-        plt.savefig(str(code)+".png", dpi=300, bbox_inches="tight", transparent=True)
+        plt.savefig(str(REPORT_DIR / (str(code) + ".png")), dpi=300, bbox_inches="tight", transparent=True)
 
     def add_text_remark(self, text, box_width, box_height, font_size=14, bold=False, padding=10):
         # 选择字体
@@ -552,7 +553,7 @@ class PDFGenerator:
         })
 
         pdf_generator.add_spider(data, id)
-        plt_path = Path(str(id)+'.png')
+        plt_path = REPORT_DIR / (str(id) + '.png')
         item_remark = "BMI："+remark_none+"\n"+"\n"+\
                       "肺活量："+remark_none+"\n"+"\n"+\
                       "仰卧起坐/引体向上："+ remark0 +"\n"+"\n"\
@@ -573,7 +574,7 @@ class PDFGenerator:
         pdf_generator.draw_text_once("报告生成时间：" + timestamp, x=310, y=self.y -750, alignment="center",
                             font_size=10)
 
-        pdf_generator.save_pdf("report_pdf/my_report.pdf")
+        pdf_generator.save_pdf(str(REPORT_DIR / "my_report.pdf"))
         plt_path.unlink()
 
 

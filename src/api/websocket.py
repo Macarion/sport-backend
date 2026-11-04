@@ -7,7 +7,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from aiortc.rtcicetransport import candidate_from_aioice
 from aiortc import MediaStreamError, RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 
-from .config import get_logger
+from core.log import get_logger
 from .user_manager import user_manager
 
 log = get_logger('WebSocket')

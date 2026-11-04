@@ -6,7 +6,7 @@
 
 - 当前，仰卧起坐、引体向上、立定跳远使用前端网页的摄像头，坐位体前屈使用后端的摄像头
 ```
-# api/config.py
+# core/config.py
 
 CAMERA_INDEX = 0
 ```

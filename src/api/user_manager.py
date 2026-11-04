@@ -11,6 +11,7 @@ import threading
 import time
 import multiprocessing as mp
 
+from core.config import IDLE_TIMEOUT
 from core.log import get_logger
 from core.registry import is_registered
 from core.shm import SlotSet, attach_slot
@@ -18,8 +19,6 @@ from core.task import SportTask
 from worker.run_user_worker import run_user_worker
 
 log = get_logger('UserManager')
-
-IDLE_TIMEOUT = 60           # 会话空闲销毁（与 worker 兜底同口径）
 FINISH_JOIN_TIMEOUT = 5     # 发停止信号后等待 worker 退出的上限
 POLL_INTERVAL = 0.2         # 结果轮询间隔（秒）
 

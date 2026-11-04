@@ -5,16 +5,12 @@ import numpy as np
 from enum import IntEnum
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
+from core.config import (
+    FONT_DIR, POSE_YOLO_BOX_CONF, POSE_YOLO_IMG_SZ, POSE_YOLO_KPT_CONF,
+    POSE_YOLO_MODEL_PATH, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER,
+    SITUP_MARKER_UPPER,
+)
 from core.task import SportTask
-
-# 项目规格（原 src/config.py 项目段，随配置拆解归位）
-SITUP_MARKER_ENABLED = False
-SITUP_MARKER_LOWER = (35, 50, 100)
-SITUP_MARKER_UPPER = (100, 255, 255)
-SITUP_YOLO_MODEL_PATH = 'vendor/yolo_pose/yolov8n-pose.pt'  # 相对 backend 根（入口已 chdir）
-SITUP_YOLO_IMG_SZ = 640
-SITUP_YOLO_BOX_CONF = 0.5
-SITUP_YOLO_KPT_CONF = 0.5
 
 
 class PosePoint:
@@ -140,10 +136,10 @@ class Inferencer(_BasePoseInferencer):
         from ultralytics import YOLO
         
 
-        self.model = YOLO(SITUP_YOLO_MODEL_PATH)  # 首次运行自动下载权重
-        self.img_sz = SITUP_YOLO_IMG_SZ
-        self.box_conf = SITUP_YOLO_BOX_CONF
-        self.kpt_conf = SITUP_YOLO_KPT_CONF
+        self.model = YOLO(POSE_YOLO_MODEL_PATH)  # 首次运行自动下载权重
+        self.img_sz = POSE_YOLO_IMG_SZ
+        self.box_conf = POSE_YOLO_BOX_CONF
+        self.kpt_conf = POSE_YOLO_KPT_CONF
 
     def _select_person(self, r, frame_shape) -> int:
         """按"靠画面中心 + 框面积大"加权选人，返回检测索引。
@@ -399,7 +395,7 @@ class Evaluator:
         draw = ImageDraw.Draw(pil_img)
         try:
             fontStyle = ImageFont.truetype(
-                "simsun.ttc", textSize, encoding="utf-8", index=1
+                str(FONT_DIR / "msyh.ttf"), textSize, encoding="utf-8", index=1
             )
         except:
             fontStyle = ImageFont.load_default()

@@ -13,11 +13,10 @@ import queue
 import time
 import multiprocessing as mp
 
+from core.config import IDLE_TIMEOUT
 from core.log import get_logger
 from core.registry import load_sport
 from core.task import SportTask
-
-IDLE_TIMEOUT = 60  # 与 web 会话空闲销毁同口径；仅作 web 异常退出时的兜底
 
 
 def run_user_worker(sport_type, in_q, out_q):

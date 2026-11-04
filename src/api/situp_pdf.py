@@ -19,11 +19,12 @@ from reportlab.pdfbase.ttfonts import TTFont
 from PyPDF4 import PdfFileWriter, PdfFileReader
 from kivy.core.text import LabelBase
 from matplotlib.font_manager import FontProperties
+from core.config import FONT_DIR, REPORT_DIR
 from .student_bulk import get_student_info_for_report
 
-LabelBase.register(name='Font_HanZi', fn_regular='./msyh.TTF')
-LabelBase.register(name='Font_HanZi_bd', fn_regular='./msyhbd.ttf')
-Font_HanZi_bd = FontProperties(fname="./msyhbd.ttf")
+LabelBase.register(name='Font_HanZi', fn_regular=str(FONT_DIR / 'msyh.ttf'))
+LabelBase.register(name='Font_HanZi_bd', fn_regular=str(FONT_DIR / 'msyhbd.ttf'))
+Font_HanZi_bd = FontProperties(fname=str(FONT_DIR / 'msyhbd.ttf'))
 
 
 def generate_id(existing_codes, length=12):
@@ -40,8 +41,8 @@ class SitupPDFGenerator:
     
     def __init__(self):
         # 注册字体
-        pdfmetrics.registerFont(TTFont('Font_HanZi', 'msyh.TTF'))
-        pdfmetrics.registerFont(TTFont('Font_HanZi_bd', 'msyhbd.TTF'))
+        pdfmetrics.registerFont(TTFont('Font_HanZi', str(FONT_DIR / 'msyh.ttf')))
+        pdfmetrics.registerFont(TTFont('Font_HanZi_bd', str(FONT_DIR / 'msyhbd.ttf')))
         pdfmetrics.registerFontFamily('STHanZi', normal='Font_HanZi', italic=None, boldItalic='Font_HanZi_bd')
 
         self.pdf_writer = PdfFileWriter()
@@ -158,7 +159,7 @@ class SitupPDFGenerator:
                 fontsize=14, color='#666666', fontproperties=Font_HanZi_bd)
         
         # 保存图片
-        gauge_path = 'temp_gauge_situp.png'
+        gauge_path = str(REPORT_DIR / 'temp_gauge_situp.png')
         plt.savefig(gauge_path, dpi=150, bbox_inches='tight', transparent=True)
         plt.close()
         
@@ -455,6 +456,6 @@ class SitupPDFGenerator:
         self.draw_footer(timestamp)
         
         # 保存 PDF
-        self.save_pdf("report_pdf/situp_report.pdf")
-        
-        return "report_pdf/situp_report.pdf"
+        self.save_pdf(str(REPORT_DIR / "situp_report.pdf"))
+
+        return str(REPORT_DIR / "situp_report.pdf")

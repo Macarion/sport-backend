@@ -8,13 +8,8 @@ import os
 import signal
 import sys
 import time
-from pathlib import Path
-
+from core.config import BACKEND_ROOT, DAPHNE_PORT
 from core.log import get_logger
-
-SRC_DIR = Path(__file__).resolve().parent
-BACKEND_ROOT = SRC_DIR.parent
-DAPHNE_PORT = int(os.environ.get('DAPHNE_PORT', '8090'))
 
 log = get_logger('main')
 _cleaned = False
@@ -50,7 +45,7 @@ def _prewarm():
 
 
 def main():
-    os.chdir(BACKEND_ROOT)  # 资源相对路径（vendor/ 权重等）统一以 backend 根为基准
+    os.chdir(BACKEND_ROOT)  # 未锚定的相对路径（latest.jpg、auth.log 等）以 backend 根为基准；vendor 资产已走绝对路径
 
     import multiprocessing as mp
     mp.set_start_method('spawn', force=True)

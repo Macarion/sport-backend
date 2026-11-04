@@ -5,10 +5,8 @@ import numpy as np
 from enum import IntEnum
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
+from core.config import FONT_DIR, PULLUP_STATIC_IMAGE_MODE
 from core.task import SportTask
-
-# 项目规格（原 src/config.py 项目段，随配置拆解归位）
-PULLUP_STATIC_IMAGE_MODE = True
 
 class PosePoint:
 
@@ -144,7 +142,7 @@ class Evaluator:
         draw = ImageDraw.Draw(pil_img)
         try:
             fontStyle = ImageFont.truetype(
-                "simsun.ttc", textSize, encoding="utf-8", index=1
+                str(FONT_DIR / "msyh.ttf"), textSize, encoding="utf-8", index=1
             )
         except:
             fontStyle = ImageFont.load_default()
@@ -919,7 +917,7 @@ def cv2ImgAddText(img, text, left, top, textColor=(0, 255, 0), textSize=10, bord
 
     draw = ImageDraw.Draw(img)  # 创建一个可以在给定图像上绘图的对象
     try:
-        fontStyle = ImageFont.truetype("simsun.ttc", textSize, encoding="utf-8", index=1)
+        fontStyle = ImageFont.truetype(str(FONT_DIR / "msyh.ttf"), textSize, encoding="utf-8", index=1)
     except:
         fontStyle = ImageFont.load_default()
 

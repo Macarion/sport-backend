@@ -58,7 +58,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from django.core.validators import validate_email
 
 from api.user_manager import user_manager
-from api.config import CAMERA_INDEX
+from core.config import CAMERA_INDEX, REPORT_DIR
 from django.http import JsonResponse, HttpResponse
 
 from .sitreach import (
@@ -116,7 +116,6 @@ DATA_FILE: Path = Path(__file__).resolve().parent / "runtime_data.json"
 PULLUP_DATA_FILE = Path(__file__).resolve().parent / "pullup_runtime_data.json"
 _JSON_LOCK = threading.Lock()         # 并发写锁
 BASE_DIR: Path = Path(__file__).resolve().parent.parent
-REPORT_DIR: Path = BASE_DIR / "report_pdf/"
 
 # ---------- 辅助函数 ----------
 
