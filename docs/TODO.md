@@ -58,7 +58,10 @@
 
 验证：官方入口启动（YOLO 权重绝对路径加载成功）；触发一次 PDF 报告生成（字体注册 + 写出到 `src/report_pdf/`）；`python -c "import face_sdk"` 从 sport-backend 根通过。
 
-## 第 3 步：四段生命周期 rename（只改名不改行为）
+## 第 3 步：四段生命周期 rename（只改名不改行为） ✅ 已完成（2026-11-04）
+
+> 范围补充：除计划内的 `run_user_worker` 调用点外，`main._prewarm` 也调 `start/stop`（侦察时发现的第三处调用点），一并改为 `load/close`；两处 `RuntimeError('…未调用 start()')` 文案同步改 `load()`；worker 收口日志 `stop 失败`→`close 失败`。`reset()` 最小实现 = 重建 `Evaluator`（两实现一致）。jump `session.py` 与 legacy 的同名 `start/stop` 与 BaseSport 无关，不动。
+> 验证：py_compile 全过；`sport.start()/sport.stop()` 全仓零残留；预热双项目（`load→close` 路径）；连续两会话冒烟 `STEP3_SMOKE_OK`（两条 WS 序列均 `[phase:ready, end]`）。
 
 改动：
 - `sports/base.py`：`start→load`、`stop→close`、新增 `reset`（均 abstract）。
@@ -72,7 +75,10 @@
 
 验证：编译 + 单会话全流程冒烟（行为应与改前逐字节一致）。
 
-## 第 4 步：进程复用池（最大行为变更，专项验证）
+## 第 4 步：进程复用池（最大行为变更，专项验证） ✅ 已完成（2026-11-04）
+
+> 设计要点（实现与 TODO 的偏差/补充）：① **ready 兜底 = 进程死亡即时检测**（pump 空轮询发现 `not proc.is_alive()` → 立即报错收口），未做"超时自动重 spawn"——自动重试会掩盖确定性加载失败，错误直接透传前端更诚实；② **out_q 单读者原则**：同 uid 重启时 HTTP 侧等旧泵收口（≤5s，超时放弃本次启动），不做双读者抢 `finished`；③ 测试中发现真缺口：**进程死亡后才接入的 WS 会悬挂**——`register_consumer` 对会话已收口的晚接入补发 `test_end`（前端立刻收到 end）；④ worker 会话空闲超时 = 驻留窗口 +10s 余量，保证 web 的停止信号先到、收口走 `finished` 而非超时；⑤ `shutdown_all` 增加 pump cancel + 驻留池销毁；⑥ 环境观察（非本步回归，steps1–3 同样）：supervisor/proc 停止**不触发** Python 信号/atexit，`shutdown_all` 用进程内驱动验证。
+> 验证：py_compile 全过；专项套件 `STEP4_ALL_OK`——A 基本会话、B 复用（同 PID 不新增）、C 同 uid 快速重测、D 并发（池空即 spawn 第二进程）、F 驻留 60s 自灭（`leftover=[]`，服务日志两条"驻留超过 60 秒无新会话，退出"）、E 进程死亡后晚接入 WS **0.0s 补 end**；服务日志另证连续 6 会话复用同一 PID；`shutdown_all` 进程内驱动：有会话 3.0s（无 pump 路径）、空状态 0.00s、无 worker 残留。
 
 **目标**：同项目连续测试不再等 8 秒模型加载；并发各进程独立驻留 60 秒；无 Manager、无类型封顶、无常驻。
 

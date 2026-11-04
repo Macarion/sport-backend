@@ -37,8 +37,8 @@ def _prewarm():
         t0 = time.time()
         try:
             sport = load_sport(key)()
-            sport.start()
-            sport.stop()
+            sport.load()
+            sport.close()
             log.info('预热完成: %s 耗时%.1fs', key, time.time() - t0)
         except Exception as e:
             log.error('预热失败: %s -> %s', key, e)
