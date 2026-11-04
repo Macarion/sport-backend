@@ -168,9 +168,7 @@ class UserManager:
     def _request_stop(self, session):
         session.stopping_at = time.time()
         try:
-            task = SportTask(uid=session.uid, frame_id=-1,
-                             sport_type=session.sport_type, finished=True)
-            session.in_q.put(task.to_bytes())
+            session.in_q.put({'type': 'stop'})
         except Exception as e:
             log.error('发送停止信号失败: uid=%s err=%s', session.uid, e)
 
@@ -338,7 +336,7 @@ class UserManager:
 
         task = SportTask(uid, frame_id, session.sport_type,
                          slot, frame.shape, session.config)
-        session.in_q.put(task.to_bytes())
+        session.in_q.put({'type': 'task', 'task': task.to_dict()})
         session.last_active = time.time()
         session.push_ok += 1
         self._rate(session)

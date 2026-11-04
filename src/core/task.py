@@ -1,15 +1,18 @@
 # core/task.py
-import pickle
 from contextlib import contextmanager
 
 from .shm import attach_slot
 
 
 class SportTask:
-    """进程间传递任务信息的类（唯一定义，web 与用户进程共用）。"""
+    """进程间传递任务信息的类（唯一定义，web 与用户进程共用）。
+
+    序列化铁律：只经 to_dict() 白名单字段过队列；_shm/_frame 是进程内
+    attach 句柄，绝不进消息——否则整块视频帧会随管道传输，共享内存失去意义。
+    """
 
     def __init__(self, uid, frame_id, sport_type, shm_name=None, frame_shape=None,
-                 config=None, data=None, finished=False):
+                 config=None, data=None):
         self.uid = uid
         self.frame_id = frame_id
         self.sport_type = sport_type
@@ -17,7 +20,6 @@ class SportTask:
         self.frame_shape = frame_shape
         self.config = config
         self.data = data
-        self.finished = finished
 
         self._shm = None
         self._frame = None
@@ -75,11 +77,9 @@ class SportTask:
         """获取程序间传输的自定义数据"""
         return self.data
 
-    def set_finished(self, finished):
-        self.finished = finished
-
-    def is_finished(self):
-        return self.finished
+    def __reduce__(self):
+        """禁止整对象 pickle：直接 put(task) 会把 _frame/_shm 拖过管道。"""
+        raise TypeError('SportTask 必须经 to_dict() 白名单序列化后入队，禁止直接 put(task)')
 
     @contextmanager
     def link_frame(self):
@@ -90,9 +90,9 @@ class SportTask:
         finally:
             self._close_frame()
 
-    def to_bytes(self):
-        """经 mp.Queue 传输时序列化为字节"""
-        data = {
+    def to_dict(self):
+        """白名单字段序列化（in_q 信封的任务体）；_shm/_frame 永不入列。"""
+        return {
             'uid': self.uid,
             'frame_id': self.frame_id,
             'sport_type': self.sport_type,
@@ -100,14 +100,11 @@ class SportTask:
             'frame_shape': self.frame_shape,
             'config': self.config,
             'data': self.data,
-            'finished': self.finished,
         }
-        return pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
 
     @classmethod
-    def from_bytes(cls, byte_data):
-        """从字节反序列化"""
-        data = pickle.loads(byte_data)
+    def from_dict(cls, data):
+        """从信封任务体反序列化；_frame 由调用方经 link_frame() 按名 attach。"""
         return cls(
             uid=data['uid'],
             frame_id=data['frame_id'],
@@ -116,5 +113,4 @@ class SportTask:
             frame_shape=data.get('frame_shape'),
             config=data.get('config'),
             data=data.get('data'),
-            finished=data.get('finished', False),
         )

@@ -7,9 +7,11 @@
     {'type': 'result', 'frame_id', 'slot', 'data': dict|None}  每帧必回，slot 回执供 web 释放
     {'type': 'finished'}                                      响应停止信号
     {'type': 'error', 'message'}                              启动/处理失败，随后退出
-  in_q（混合入口）：
-    bytes → SportTask（帧任务；finished=True 为停止/退出信号）
-    dict  → 控制消息 {'type': 'start'}：开始新会话（冷启动与复用同路径，worker reset 后回 ready）
+  in_q（全部为 dict 信封，mp.Queue 底层 pickle）：
+    {'type': 'start'}            开始新会话（冷启动与复用同路径，worker reset 后回 ready）
+    {'type': 'stop'}             停止：会话中 → 回 finished 并转入驻留；驻留中 → 退出进程
+    {'type': 'task', 'task': {…}} 帧任务体（SportTask.to_dict() 白名单字段；帧本体在
+                                  shm_name 指向的共享内存中，绝不经管道传输）
 
 生命周期：load（每进程一次）→ [等 start → reset → ready → 帧循环 → finished] 循环复用
 → 驻留窗口（IDLE_TIMEOUT）内等下一个 start，超时退出。
@@ -23,11 +25,6 @@ from core.config import IDLE_TIMEOUT
 from core.log import get_logger
 from core.registry import load_sport
 from core.task import SportTask
-
-
-def _as_control(raw):
-    """in_q 混载解包：dict 为控制消息，bytes 为 SportTask。"""
-    return raw if isinstance(raw, dict) else None
 
 
 def run_user_worker(sport_type, in_q, out_q):
@@ -51,16 +48,12 @@ def run_user_worker(sport_type, in_q, out_q):
             except queue.Empty:
                 log.info('驻留超过 %d 秒无新会话，退出', IDLE_TIMEOUT)
                 break
-            ctrl = _as_control(raw)
-            if ctrl is None:
-                task = SportTask.from_bytes(raw)
-                if task.is_finished():
-                    log.info('驻留期间收到停止信号，退出')
-                    break
-                log.warning('收到会话未开始的帧任务，忽略')
-                continue
-            if ctrl.get('type') != 'start':
-                log.warning('未知控制消息: %s', ctrl.get('type'))
+            mtype = raw.get('type')
+            if mtype == 'stop':
+                log.info('驻留期间收到停止信号，退出')
+                break
+            if mtype != 'start':
+                log.warning('会话未开始时收到 %s，忽略', mtype)
                 continue
 
             sport.reset()
@@ -76,23 +69,22 @@ def run_user_worker(sport_type, in_q, out_q):
                     log.info('会话空闲超过 %d 秒，退出', IDLE_TIMEOUT + 10)
                     running = False
                     break
-                ctrl = _as_control(raw)
-                if ctrl is not None:
-                    if ctrl.get('type') == 'start':
-                        log.warning('会话进行中收到重复 start，忽略')
-                    else:
-                        log.warning('未知控制消息: %s', ctrl.get('type'))
-                    continue
-                task = SportTask.from_bytes(raw)
-                if task.is_finished():
+                mtype = raw.get('type')
+                if mtype == 'task':
+                    task = SportTask.from_dict(raw['task'])
+                    frame_id = task.get_frame_id()
+                    with task.link_frame():
+                        data = sport.process(task.get_frame(), task.get_config(),
+                                             frame_id, task.get_uid())
+                    out_q.put({'type': 'result', 'frame_id': frame_id,
+                               'slot': task.get_shm_name(), 'data': data})
+                elif mtype == 'stop':
                     out_q.put({'type': 'finished'})
                     break               # 回到外层：驻留等待下一个 start
-                frame_id = task.get_frame_id()
-                with task.link_frame():
-                    data = sport.process(task.get_frame(), task.get_config(),
-                                         frame_id, task.get_uid())
-                out_q.put({'type': 'result', 'frame_id': frame_id,
-                           'slot': task.get_shm_name(), 'data': data})
+                elif mtype == 'start':
+                    log.warning('会话进行中收到重复 start，忽略')
+                else:
+                    log.warning('未知消息类型: %s', mtype)
     except (KeyboardInterrupt, EOFError):
         log.info('收到中断或管道关闭，退出')
     except Exception as e:

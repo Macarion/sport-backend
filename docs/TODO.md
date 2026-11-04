@@ -79,6 +79,7 @@
 
 > 设计要点（实现与 TODO 的偏差/补充）：① **ready 兜底 = 进程死亡即时检测**（pump 空轮询发现 `not proc.is_alive()` → 立即报错收口），未做"超时自动重 spawn"——自动重试会掩盖确定性加载失败，错误直接透传前端更诚实；② **out_q 单读者原则**：同 uid 重启时 HTTP 侧等旧泵收口（≤5s，超时放弃本次启动），不做双读者抢 `finished`；③ 测试中发现真缺口：**进程死亡后才接入的 WS 会悬挂**——`register_consumer` 对会话已收口的晚接入补发 `test_end`（前端立刻收到 end）；④ worker 会话空闲超时 = 驻留窗口 +10s 余量，保证 web 的停止信号先到、收口走 `finished` 而非超时；⑤ `shutdown_all` 增加 pump cancel + 驻留池销毁；⑥ 环境观察（非本步回归，steps1–3 同样）：supervisor/proc 停止**不触发** Python 信号/atexit，`shutdown_all` 用进程内驱动验证。
 > 验证：py_compile 全过；专项套件 `STEP4_ALL_OK`——A 基本会话、B 复用（同 PID 不新增）、C 同 uid 快速重测、D 并发（池空即 spawn 第二进程）、F 驻留 60s 自灭（`leftover=[]`，服务日志两条"驻留超过 60 秒无新会话，退出"）、E 进程死亡后晚接入 WS **0.0s 补 end**；服务日志另证连续 6 会话复用同一 PID；`shutdown_all` 进程内驱动：有会话 3.0s（无 pump 路径）、空状态 0.00s、无 worker 残留。
+> 协议修订（完成后追加，用户实测通过）：`in_q` 统一为 dict 信封——`{'type':'start'}` / `{'type':'stop'}` / `{'type':'task','task':{…}}`；`SportTask.to_bytes/from_bytes` 删除，改白名单 `to_dict/from_dict`（**`_frame/_shm` 永不入列**，类 docstring 铁律 + `__reduce__` 对整对象 pickle 直接抛错——防止 `put(task)` 把整块视频帧拖过管道、共享内存失去意义）；stop 不再伪装成 `finished=True` 的帧任务（`finished` 字段一并删除）；与 `out_q` 的 `{'type':…}` 协议完全对称。验证：`ENVELOPE_ALL_OK`（`__reduce__` 抛错、白名单 7 键、真实帧 SHM 往返 4 条 result、stop→finished→归池、同 PID 复用、shutdown 清池零残留）。
 
 **目标**：同项目连续测试不再等 8 秒模型加载；并发各进程独立驻留 60 秒；无 Manager、无类型封顶、无常驻。
 
