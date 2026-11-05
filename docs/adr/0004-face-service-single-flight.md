@@ -14,3 +14,8 @@
 - 识别结果天然可能跨越多帧，评测状态机必须按"结果属于哪次触发"消费，而非按帧对齐。
 - 识别阶段的画面评测照常进行，仅计数被门禁挂起。
 - 前端提示完全由 `phase` 消息驱动。
+
+## 修订（2026-11-04，第 7 步实现）
+
+- 应答通路：`reply_to` **不能是 mp.Queue**——Queue 对象禁止穿过另一条队列（spawn `assert_spawning` 实测拒绝）。实现改为 `submit` 现场建单向 `mp.Pipe`，写端随请求捎带（Connection 可跨进程 pickle，实测），读端由 face_client 转发线程落回 `in_q`。"web 不在回路、单任务无排队"等决策不变。
+- `is_registered` 在人脸服务内执行（db 归服务所有，worker 不 import face_sdk）；未注册放行由总开关 `FACE_GATE_ENABLED`（默认关）整体门控。

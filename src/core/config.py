@@ -22,6 +22,10 @@ IDLE_TIMEOUT = 60                # 会话空闲销毁与 worker 驻留同口径�
 DAPHNE_PORT = int(os.environ.get('DAPHNE_PORT', '8090'))
 PREWARM_ENABLED = False          # 开机预热子进程：默认关（模型打热文件缓存，有效性存疑）
 
+# ---------- 人脸门禁（第 7 步，ADR-0004） ----------
+FACE_GATE_ENABLED = True        # 总开关：True 时 spawn 人脸服务并在 situp 转 READY 前门禁（默认关）
+FACE_GATE_TIMEOUT = 10           # 识别应答超时（秒）：超时按未通过处理并清在途，下一帧重试
+
 # ---------- 日志 ----------
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
 
@@ -39,5 +43,5 @@ SITUP_MARKER_ENABLED = False
 SITUP_MARKER_LOWER = (35, 50, 100)
 SITUP_MARKER_UPPER = (100, 255, 255)
 
-# ---------- 引体向上传感（MediaPipe；第 8 步换 YOLO 后删除本节） ----------
+# ---------- 引体向上传感（MediaPipe 遗留常量；第 8 步已换 YOLO，按用户决定死代码先保留） ----------
 PULLUP_STATIC_IMAGE_MODE = True

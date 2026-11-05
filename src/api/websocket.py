@@ -79,10 +79,10 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         }))
         await self.close()
 
-    async def phase(self, event):
+    async def loaded(self, event):
         await self.send(text_data=json.dumps({
-            "type": "phase",
-            "phase": event.get("phase", "ready"),
+            "type": "loaded",
+            "value": event.get("value"),
         }))
 
     async def error(self, event):

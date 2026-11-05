@@ -26,3 +26,7 @@ class BaseSport(ABC):
     @abstractmethod
     def close(self):
         """释放模型与状态。"""
+
+    def set_face_client(self, face_client):
+        """注入人脸识别客户端（worker 启动时调用；不接人脸的项目自然无感）。"""
+        self._face_client = face_client

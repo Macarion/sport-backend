@@ -6,9 +6,9 @@ from enum import IntEnum
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 from core.config import (
-    FONT_DIR, POSE_YOLO_BOX_CONF, POSE_YOLO_IMG_SZ, POSE_YOLO_KPT_CONF,
-    POSE_YOLO_MODEL_PATH, SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER,
-    SITUP_MARKER_UPPER,
+    FONT_DIR, POSE_YOLO_BOX_CONF,
+    POSE_YOLO_IMG_SZ, POSE_YOLO_KPT_CONF, POSE_YOLO_MODEL_PATH,
+    SITUP_MARKER_ENABLED, SITUP_MARKER_LOWER, SITUP_MARKER_UPPER,
 )
 from core.task import SportTask
 
@@ -268,19 +268,21 @@ class Inferencer(_BasePoseInferencer):
 
 # 评测状态
 class State(IntEnum):
-    WAITING = 0     # 等待开始
-    READY = 1       # 准备就绪
-    FLAT = 2        # 平躺
-    RISE = 3        # 起身
-    WAIT_FLAT = 4   # 作弊后等待平躺
-    FINISHED = 5    # 评测结束
+    WAIT = 0        # 等待坐下
+    FACE = 1        # 正在进行人脸识别
+    READY = 2       # 识别通过，等待躺下
+    FLAT = 3        # 平躺（躺下合格进入测试）
+    RISE = 4        # 起身
+    WAIT_FLAT = 5   # 作弊后等待平躺
+    FINISHED = 6    # 评测结束
 
 
 class Evaluator:
     # 评测算法
 
-    def __init__(self):
-        self.state = State.WAITING
+    def __init__(self, face_client=None):
+        self.face_client = face_client  # 人脸识别客户端（None=门禁关闭，直接放行）
+        self.state = State.WAIT
         self.num = 0
         
 
@@ -445,6 +447,38 @@ class Evaluator:
         np.copyto(img, cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR))
         return img
 
+    def _sit_ok(self, points) -> bool:
+        """坐姿判定（阶段一）：臀部贴地（不高于脚踝40px）且双腿屈膝（双膝高于脚踝20px，非伸直）。"""
+        return (
+            points[11].y >= points[15].y - 40
+            and points[12].y >= points[16].y - 40
+            and points[13].y <= points[15].y - 20
+            and points[14].y <= points[16].y - 20
+        )
+
+    def _face_admitted(self, task) -> bool:
+        """阶段一坐姿合格后的人脸核验：门禁未接 → 放行；否则裁剪选中者并询 FaceClient。"""
+        if self.face_client is None:
+            return True
+        data = task.get_data() or {}
+        boxes = data.get("person_boxes") or []
+        sel = data.get("selected_idx", -1)
+        crop = None
+        if 0 <= sel < len(boxes):
+            crop = self._crop(task.get_frame(), boxes[sel])
+        return self.face_client.face_recognition(task.get_uid(), crop)
+
+    @staticmethod
+    def _crop(frame, box):
+        """按 YOLO 框裁剪当前帧（同坐标系直接切片；copy 脱离 SHM，pickle 安全）。"""
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = (int(v) for v in box[:4])
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return None
+        return frame[y1:y2, x1:x2].copy()
+
     # ==========================
     # 循环处理函数
     # ==========================
@@ -489,13 +523,14 @@ class Evaluator:
         y2 = int(points[15].y)
 
         # 未正式测试时，绘制绿色预设参考地面线+中点标记
-        if self.state == State.WAITING:
+        if self.state < State.FLAT:
             if drawing:
                 cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
                 cv2.circle(img, (x3, int(x3 * k1 + y001)), 5, (255, 0, 0), -1)
 
             # 参考线与当前肩脚连线夹角差≥5°且未进入测试，缓存肩、脚踝坐标用于拟合地面线
-            if abs(math.degrees(math.atan(k0)) - math.degrees(math.atan(k1))) >= 5:
+            # （等待坐下/人脸阶段冻结：拟合只在等躺下阶段更新，测试期冻结沿用原行为）
+            if self.state == State.READY and abs(math.degrees(math.atan(k0)) - math.degrees(math.atan(k1))) >= 5:
                 self.shoulder_x = x1
                 self.shoulder_y = y1
                 self.heal_x = x2
@@ -511,8 +546,8 @@ class Evaluator:
         # 计算拟合基线在x01/x02两点对应的Y值
         y01, y02 = int(k0 * x01 + b0), int(k0 * x02 + b0)
         
-        if drawing:
-            # 绘制红色拟合地面基准线
+        if drawing and self.state >= State.READY:
+            # 绘制红色拟合地面基准线（等躺下之前拟合值未更新，不画）
             cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
 
         # =================================
@@ -563,13 +598,9 @@ class Evaluator:
 
         self.obsY5.append(body_ground_angle - abs((math.atan(k1)) / math.pi * 180))
 
-        # ========== 环境合格判定逻辑：肩、头、脚关键点在地面线下方 ==========
-        if self.state == State.WAITING:
-            if (
-                points[15].y <= k0 * points[15].x + b0 + 15
-                and points[11].y <= k0 * points[11].x + b0 + 15
-                and points[5].y <= k0 * points[5].x + b0 + 15
-            ):
+        # ========== 阶段一：等待坐下 → 人脸核验 → 通过转等躺下（READY） ==========
+        if self.state == State.WAIT:
+            if self._sit_ok(points):
                 if points[1].y > 0 and points[1].x > 0:
                     # 双脚在画面内，累计合格帧
                     if (
@@ -580,26 +611,32 @@ class Evaluator:
                     ):
                         self.env_ok_count += 1
                         # 连续10帧环境正常，标记环境合格env_ifok=1
-                        if frame_id >= 20 and self.env_ok_count >= 10:
+                        if self.env_ok_count >= 10:
                             self.env_ifok = 1
+                            self.state = State.FACE
+                            self.env_ok_count = 0
                     else:
                         self.env_ifok = -1  # 脚出框
                         self.env_ok_count = 0
                 else:
                     self.env_ifok = -2  # 头部关键点丢失
                     self.env_ok_count = 0
-            else:
-                self.env_ifok = -4  # 躯干高于地面基准线，位置偏移
-                self.env_ok_count = 0
+        if self.state == State.FACE:
+            if self._sit_ok(points) and self._face_admitted(task):
+                self.state = State.READY
 
-        # ========== 环境状态文字提示分支（env_ifok区分环境异常） ==========
-        if self.state == State.WAITING:
-            if self.env_ifok == 0:
-                hints.append("测试环境检测中")
-                hints.append("请准备")
+        # ========== 环境状态文字提示分支（按状态/环境异常） ==========
+        if self.state == State.WAIT:
+            # 等待坐下（人脸提示由 data.face 驱动前端 faceHint）
+            hints.append("请坐下，双腿屈膝固定，准备测试")
+            if drawing:
+                img = self.img_put_text(img, "请坐下，双腿屈膝固定，准备测试", 25, 15, (0, 0, 255))
+        elif self.state == State.READY:
+            # 人脸已过，等待躺下
+            if self.env_ifok == 1:
+                hints.append("请平躺，双腿保持不动")
                 if drawing:
-                    img = self.img_put_text(img, "测试环境检测中", 25, 15, (0, 0, 255))
-                    img = self.img_put_text(img, "请准备", 400, 50, (255, 165, 0))
+                    img = self.img_put_text(img, "请平躺，双腿保持不动", 25, 15, (0, 0, 255))
             elif self.env_ifok == -1:
                 hints.append("脚出画框，请重新调整")
                 if drawing:
@@ -612,22 +649,21 @@ class Evaluator:
                 hints.append("斜度大于15°，请重新调整")
                 if drawing:
                     img = self.img_put_text(img, "斜度大于15°，请重新调整", 25, 15, (0, 0, 255))
-            elif self.env_ifok == -4:
-                hints.append("请平躺")
-                if drawing:
-                    img = self.img_put_text(img, "请平躺", 25, 15, (0, 0, 255))
 
-        # ========== 判定是否进入预备阶段 ==========
-        # 躯干脚底夹角差值<=10，环境合格，累计预备帧
+        # ========== 等躺下阶段：躺下合格进入测试（FLAT） ==========
+        # 躯干脚底夹角差值<=10，肩、头、脚关键点在地面线下方
         if (
-            self.state == State.WAITING
+            self.state == State.READY
             and body_ground_angle - base_angle <= 10
             and self.env_ifok == 1
+            and points[15].y <= k0 * points[15].x + b0 + 15
+            and points[11].y <= k0 * points[11].x + b0 + 15
+            and points[5].y <= k0 * points[5].x + b0 + 15
         ):
             self.ready_count += 1
             # 10帧预备姿态，正式开启测试
             if self.ready_count >= 10:
-                self.state = State.READY
+                self.state = State.FLAT
                 self.ready_time = time.time()
 
         if (
@@ -645,7 +681,7 @@ class Evaluator:
         is_new_rise = False
        
         # ========== 正式测试阶段主逻辑 ==========
-        if self.state >= State.READY and self.state < State.FINISHED:
+        if self.state >= State.FLAT and self.state < State.FINISHED:
 
             # ========== 修正躯干夹角body_ground_angle2（分段补偿误差） ==========
             # 不清楚为什么这么做
@@ -724,8 +760,7 @@ class Evaluator:
 
             # 平躺判定逻辑
             if (
-                self.state == State.READY
-                or self.state == State.RISE
+                self.state == State.RISE
                 or self.state == State.WAIT_FLAT
             ):
                 if self.is_flat(body_ground_angle2):
@@ -754,7 +789,7 @@ class Evaluator:
             if is_new_rise and start_count:
                 self.num += 1
 
-        if self.state >= State.READY:
+        if self.state >= State.FLAT:
             # ========== 作弊状态提示 ==========
             if self.is_arm_force_cheat:
                 hints.append("手臂打开借力")
@@ -804,10 +839,11 @@ class Evaluator:
 
         return {
             "frame_id": frame_id,
-            "ready": self.state >= State.READY,
+            "ready": self.state >= State.FLAT,
             "score": self.num,
             "angle": body_ground_angle2,
             "hints": hints,
+            "face": self.face_client.status() if self.face_client else None,
             "is_waiting_for_flat": self.env_ifok == -4,
             "is_new_rise": is_new_rise,
             "is_arm_force_cheat": self.is_arm_force_cheat,
@@ -829,15 +865,16 @@ class SportSitup(BaseSport):
     def __init__(self):
         self._inferencer = None
         self._evaluator = None
+        self._face_client = None     # 人脸识别客户端（set_face_client 注入）
 
     def load(self):
         """加载模型与评测状态机（用户进程内调用，耗时秒级，每进程一次）。"""
         self._inferencer = Inferencer()
-        self._evaluator = Evaluator()
+        self._evaluator = Evaluator(face_client=self._face_client)
 
     def reset(self):
         """换会话复位：重建评测状态机，推理模型保留（进程复用，ADR-0003）。"""
-        self._evaluator = Evaluator()
+        self._evaluator = Evaluator(face_client=self._face_client)
 
     def process(self, frame, config, frame_id, uid=0):
         """处理一帧（就地绘制），返回评测数据 dict；本帧无有效数据返回 None。"""

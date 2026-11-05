@@ -3,17 +3,17 @@
 
 消息协议：
   out_q（单向出口）：
-    {'type': 'phase', 'phase': 'ready'}                       会话就绪（load/reset 完成后）
+    {'type': 'loaded', 'value': True|False}                 模型加载完成通知（reset 后 True；load 失败 False）
     {'type': 'result', 'frame_id', 'slot', 'data': dict|None}  每帧必回，slot 回执供 web 释放
     {'type': 'finished'}                                      响应停止信号
     {'type': 'error', 'message'}                              启动/处理失败，随后退出
   in_q（全部为 dict 信封，mp.Queue 底层 pickle）：
-    {'type': 'start'}            开始新会话（冷启动与复用同路径，worker reset 后回 ready）
+    {'type': 'start'}            开始新会话（冷启动与复用同路径，worker reset 后回 loaded(True)）
     {'type': 'stop'}             停止：会话中 → 回 finished 并转入驻留；驻留中 → 退出进程
     {'type': 'task', 'task': {…}} 帧任务体（SportTask.to_dict() 白名单字段；帧本体在
                                   shm_name 指向的共享内存中，绝不经管道传输）
 
-生命周期：load（每进程一次）→ [等 start → reset → ready → 帧循环 → finished] 循环复用
+生命周期：load（每进程一次）→ [等 start → reset → loaded(True) → 帧循环 → finished] 循环复用
 → 驻留窗口（IDLE_TIMEOUT）内等下一个 start，超时退出。
 """
 import os
@@ -22,12 +22,13 @@ import time
 import multiprocessing as mp
 
 from core.config import IDLE_TIMEOUT
+from core.face_client import FaceClient
 from core.log import get_logger
 from core.registry import load_sport
 from core.task import SportTask
 
 
-def run_user_worker(sport_type, in_q, out_q):
+def run_user_worker(sport_type, in_q, out_q, face_request_q=None):
     mp.current_process().name = f'User-{sport_type}'
     log = get_logger(f'Worker.{sport_type}')
     log.info('用户进程启动 PID=%d', os.getpid())
@@ -36,8 +37,14 @@ def run_user_worker(sport_type, in_q, out_q):
     try:
         sport_cls = load_sport(sport_type)
         sport = sport_cls()
+        face_client = FaceClient(face_request_q) if face_request_q else None
+        sport.set_face_client(face_client)           # 注入人脸客户端（None=门禁关闭）
         t0 = time.time()
-        sport.load()
+        try:
+            sport.load()
+        except Exception:
+            out_q.put({'type': 'loaded', 'value': False})
+            raise
         log.info('模型加载完成 耗时%.1fs', time.time() - t0)
 
         running = True
@@ -56,8 +63,10 @@ def run_user_worker(sport_type, in_q, out_q):
                 log.warning('会话未开始时收到 %s，忽略', mtype)
                 continue
 
+            if face_client is not None:
+                face_client.reset()   # 复用进程：清上一会话人脸状态与管道
             sport.reset()
-            out_q.put({'type': 'phase', 'phase': 'ready'})
+            out_q.put({'type': 'loaded', 'value': True})
             log.info('会话就绪')
 
             # ---- 会话帧循环 ----

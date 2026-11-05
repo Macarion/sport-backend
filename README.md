@@ -11,14 +11,15 @@ start.bat        :: 等价于 python src/main.py
 
 - daphne/Django 监听 `8090`（`DAPHNE_PORT` 可覆盖）。
 - 预热开关：`core/config.py` 的 `PREWARM_ENABLED`（**默认 `False`**），置 `True` 才 spawn 一次性进程加载 situp/pullup 模型打热文件缓存（日志带"预热"字样）；关闭时模型由首个会话懒加载。
+- 人脸门禁开关：`core/config.py` 的 `FACE_GATE_ENABLED`（**默认 `False`**），置 `True` 才 spawn 人脸服务（预载 face_sdk 166MB）并在 situp 转就绪前卡人脸；未注册学生放行 + 提示（18.b 过渡）。
 - Ctrl+C / SIGTERM 退出时自动销毁全部用户会话与共享内存槽。
 
 ## 目录结构
 
 | 路径 | 职责 |
 |---|---|
-| `src/main.py` | 唯一入口：轻顶层 + guard 内程序化托管 daphne、清理收口、开机预热（ADR-0002） |
-| `src/core/` | 契约层：`task.py` 任务消息（唯一定义）、`shm.py` per-user 共享内存槽、`registry.py` 字符串懒注册表、`log.py` |
+| `src/main.py` | 唯一入口：轻顶层 + guard 内程序化托管 daphne、清理收口、开机预热与人脸服务 spawn（ADR-0002/0004） |
+| `src/core/` | 契约层：`task.py` 任务消息（唯一定义）、`shm.py` per-user 共享内存槽、`registry.py` 字符串懒注册表、`log.py`、`face_service.py`/`face_client.py` 人脸门禁 IPC（ADR-0004） |
 | `src/sports/` | 体测项目封装：`base.py`（BaseSport）、`situp.py`（SportSitup）、`pullup.py`（SportPullup） |
 | `src/worker/` | `run_user_worker` 用户进程主循环（phase/result/finished/error 单一出口） |
 | `src/api/` | Django 应用：`views`/`websocket`/`user_manager`（IPC 客户端）等 |

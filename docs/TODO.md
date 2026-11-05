@@ -148,7 +148,7 @@
 - **5 秒断流回退仍暂缓（未动，勿当遗漏）**；只改 `StudentTestingSitup.vue`，pullup/standjump 页同模式列为后续。
 - 验证：按用户要求仅编译（`npm run build` 过，✓ built in 9.78s）；原计划的 `browser.open` 浏览器实测本步免做。
 
-## 第 7 步：人脸门禁（依赖 1/2/3/4）
+## 第 7 步：人脸门禁（依赖 1/2/3/4） ✅ 已完成（2026-11-04）
 
 改动：
 - 新建 `src/core/face_service.py`（spawn 目标）：
@@ -163,8 +163,8 @@
 - `SportSitup` 接入：
   - 环境检测通过、即将发 `ready` 的节点 → 插入人脸阶段：挂起 `ready`，发 `phase:'face'`；每帧（无 in-flight）用 `person_boxes[selected_idx]` 裁剪当前帧 → `submit`。
   - `handle_control(face_result)`：`ok` → 恢复原流程发 `ready`（走既有读秒）；`fail` → 发 `phase:'face_result' {ok, conf}`，前端提示重试。
-  - **未注册放行（18.b 过渡）**：先 `is_registered(student_id)` 判断——未注册直接放行并提示（不进识别），已注册才卡门。识别与"未注册"的返回区分以 `face_sdk.py:236` 实际行为为准，实现时先读。
-  - 裁剪坐标 = 原帧 YOLO 框（与 `person_boxes` 同一坐标系，直接切片）；crop 以 ndarray 进消息（pickle ✓）。
+  - **未注册放行（18.b 过渡）**：本功能在config.py添加配置控制开关，先 `is_registered(student_id)` 判断——未注册直接放行并提示（不进识别），已注册才卡门。识别与"未注册"的返回区分以 `face_sdk.py:236` 实际行为为准，实现时先读。
+  - 裁剪坐标 = 原帧目标人员的 YOLO 框（与 `person_boxes` 同一坐标系，直接切片）；crop 以 ndarray 进消息（pickle ✓）。
 - 前端 `StudentTestingSitup.vue`：`phase:'face'` → 显示"正在进行人脸识别，请注视摄像头"；`phase:'face_result'` → 显示通过/未通过（conf 可选展示）。`ready`→读秒链路不动。
 - `data/` 目录不存在则创建（`FACE_DB_PATH` 落盘处）。
 
@@ -174,7 +174,16 @@
 
 验证：未注册学生→放行+提示；`register()` 插一条后→通过才 `ready`、失败重试不积压（在途丢帧生效）；前端提示时序；复用两会话下人脸阶段干净。
 
-## 第 8 步：pullup 换 YOLO（代码量最大，放最后，专项回归）
+**完成记录**：
+- 新增 `core/face_service.py`（spawn 目标，启动即 `init_sdk` 预载；`is_registered` 服务内先查库——未注册不进识别直接放行）+ `core/face_client.py`（单任务无排队：在途拒投、应答/超时清在途、下一帧重投）。
+- **应答通路偏差**：原案 `reply_to` 直携 worker `in_q` 的 mp.Queue——**Queue 不能穿过另一条队列**（spawn `assert_spawning` 实测拒绝），改为 `submit` 现场建单向 Pipe、写端随请求捎带（Connection 可 pickle 实测过）、读端转发线程落回 `in_q`；web 仍不在回路（ADR-0004 已补修订段）。
+- `worker/run_user_worker.py`：`set_emit`/`face_client.configure` 启动注入、`face_result` 路由（`finish`+`handle_control`）、`start` 时 `face_client.reset()`（驻留复用跨会话清在途）。
+- `sports/base.py`：`set_emit` + `handle_control` 默认实现（**非 abstract**，pullup 不强制）；`situp.py`：`Evaluator(ready_gate)` 在 `ready_count>=10` 转 READY 前挂起逐帧重询，`SportSitup._face_gate`（发 `phase:face`、裁 YOLO 框 `copy()` 脱 SHM 投递、超时按未通过重试）+ `handle_control`（帧号对齐丢陈旧应答；未注册/通过→放行，失败→持续提示）。
+- **人脸阶段状态放 `SportSitup.reset()` 显式清零**（原案"重建 Evaluator 天然清零"不覆盖封装层状态，等价实现）；配置 `FACE_GATE_ENABLED`（**默认关**，同预热口径）+ `FACE_GATE_TIMEOUT=10`。
+- `user_manager` spawn 带 `get_request_q()`（门禁关时 None）；phase 透传 `ok/conf/registered` 至前端。前端 `faceHint` 优先于 hints 展示：通过 2s 自清、失败持续、`start()`/error 清残留。
+- 验证：py_compile 9 文件过；`npm run build` 过（9.93s）；**冒烟 ALL PASS（16 项 / 16.7s）**：IPC 往返、单任务在途拒投、空库未注册放行、已注册→recognize 未匹配不放行（临时插库用后即清）、闸门挂起→`phase:face`→应答回收→放行→`face_result`、陈旧应答丢弃、reset 清零、worker 冷启动 ready + `face_result` 路由不崩 + stop 收口。未覆盖：环境合格→READY 状态机全链路（需真人入画，人工验证）、已注册→**匹配通过**（需录入流程，不在本批）。
+
+## 第 8 步：pullup 换 YOLO（代码量最大，放最后，专项回归） ✅ 已完成（2026-11-05）
 
 改动（`sports/pullup.py`，硬切换）：
 - `Inferencer`（:23-66）：MediaPipe → YOLO Pose（`POSE_YOLO_*` 第 1 步已中性命名，权重同 situp 的 `vendor/yolo_pose/yolov8n-pose.pt`）；**选人复制 situp 的 `_select_person`**（中心+面积加权，用户后续自己调"正中间"）；绘制换 COCO 骨架（复制 `COCO_SKELETON`，Q9 定：代码复制不抽公共库）；输出 dict 对齐 situp 结构（含 `person_boxes/selected_idx`）。`PosePoint` 两文件各留一份（z 置 0，visibility=Yolo 关键点置信度）。
@@ -195,6 +204,13 @@
 
 验证（专项）：录屏/实拍逐场景对照——弯臂计数、鼻过杠、脚沾地、侧柱借力、离杠终止；与旧 MediaPipe 版同素材跑一遍，差异只应来自"指尖→腕"口径并经人工确认。
 
+**完成记录（2026-11-05；范围按用户指示收窄：只做关键点索引替换 + 同款选人，评测逻辑与死代码一律不动，故上列"删死代码/专项回归"项未执行）**：
+- `Inferencer`：MediaPipe 33 点 → YOLO Pose COCO 17（与 situp 共用 `POSE_YOLO_*` 权重与参数）；**逐字复制** situp 的 `_select_person`（中心 0.9 + 面积 0.1 加权）、`_draw_persons`、`_draw_keypoints`、`COCO_SKELETON`；输出增 `person_boxes/selected_idx` 对齐 situp 结构（pullup Evaluator 不读，无影响）。
+- **visibility = YOLO 关键点置信度**（0~1，与原 MediaPipe 同量纲）→ `record_keypoints` 的 ≥90% 判定一行未改。注意：YOLO 置信度分布低于 MediaPipe visibility，头肩比缓冲收样可能变稀——属评测侧调参，按指示未动。
+- active 索引替换：杠线 19/20→双腕 9/10；脚 31/32→踝 15/16；肘角 16-14-12→10-8-6；肩 11/12→5/6；耳 7/8→3/4；髋 23/24→11/12；眼 1/4→1/2；`record_keypoints` 字典→0/5/6/11/12；手部点（15/17/19/21 与 16/18/20/22）全部退化为腕 9/10（F_H 消费侧本就注释，计数无读者，行为无影响）；**着色循环 `range(33)`→`range(len(points))`** + 可到达颜色分支重映射（此为冒烟揪出的漏网点）。
+- 死代码原样保留（用户指示）：注释块中的旧 33 索引、不可达 elif（手/脚/嘴着色分支）、State/k1/k2、`PULLUP_STATIC_IMAGE_MODE` 常量（config 节注释同步改口径）。
+- 验证：`py_compile` 过；**冒烟 ALL PASS（6.2s）**：无人帧全链路不崩 + 17 点伪造悬挂姿态 60 帧评测不崩、60/60 产出 dict（`angle/num_all/score/timestamp` 键与前端契约一致）。未覆盖（按"仅编译+简单冒烟"口径）：真实人像双人选人实测（`_select_person` 为 situp 逐字复制）、真实视频计数回归（上列专项回归人工验证另排）。
+
 ---
 
 **序列之外已识别、不进本批**：jump `sam2.1_hiera_small.pt` 缺失；人脸注册/录入流程；`legacy/` 整体删除；`start_me.bat` 弃用清理；pullup/standjump 页的预览切换（第 6 步同模式后续）；pullup 选人改"正中间"（用户自调）。
@@ -206,3 +222,35 @@
 - `core/config.py` 新增 `PREWARM_ENABLED = False`（**默认关**，置 `True` 恢复原"启动即预热"）；`main.py` 按其决定是否 spawn 预热进程，关闭时打日志说明由首个会话懒加载。
 - 同步 `README.md`、`docs/architecture.md` 的"启动即预热"表述为开关语义；ADR-0002 等历史决策记录不改（开关不改变入口结构）。
 - 验证：py_compile 过（沿用本批仅编译口径）。
+
+---
+
+## 追加改动（2026-11-05）：人脸通路专用管道直读（ADR-0005）
+
+- 动机：调用方接入面过宽——relay 线程 + `in_q` 路由 + `submit/finish/poll_timeout` 三入口 + 帧号对齐散布三个模块。经两轮评审定案：**保留无状态服务端**，客户端封装为四方法门面。
+- `core/face_client.py` 重写：`configure(request_q)`（删 `in_q` 实参，建**每客户端一条持久结果管道**，不建线程）/ `send(student_id, crop)`（在途未超时拒投）/ `poll()`（每帧先调：在途先非阻塞读——命中"学号+毫秒时间戳"对应结果即返回；读空且超 `FACE_GATE_TIMEOUT` → 返回 `{'ok':False,'timeout':True}` 一次并放行重投）/ `reset()`（清状态+排空管道）。删除 `FaceRelay`/`_pending`/`finish`/`submit`/`poll_timeout`。
+- `core/face_service.py`：仅回带请求 `timestamp` 一行 + docstring 更新；服务端逻辑不变（保持无状态）。
+- `worker/run_user_worker.py`：删 `face_result` 路由分支；`configure` 实参收敛；in_q 消息表收敛为 `start`/`stop`/`task`。
+- `sports/situp.py`：`_face_gate` 改**先 poll 后 send**，应答三分支（未注册放行/成功/失败）内联；删 `_face_req_fid` 字段与 `handle_control` 覆写；`sports/base.py` 删 `handle_control` 基方法（唯一调用点即被删分支）。
+- 陈旧应答语义：学号+时间戳双键过滤，只认最近一次 send 的对应结果——超时重发后的旧应答到达即丢，行为与原帧号对齐一致（`frame_id` 仅留日志）。`poll` 顺序为**先读后判超时**：管道已有对应结果则返回结果（结果已到即不算超时），避免擦边结果被超时误丢。
+- 验证（按用户选定"仅编译"口径）：`py_compile` 5 文件过；全仓 grep 无 `finish/submit/poll_timeout/handle_control/FaceRelay/_face_req_fid` 残留。未做执行级冒烟——重复 pickle 同一写端、`poll(0)`、排空语义依赖 Python `Connection` 既有行为（原 `reply_to` 已依赖同机制），已向用户说明并按其决定省略。
+- 同日修订（用户指正）：`FaceClient` **类化**——`FaceClient(request_q, student_id, timeout)` 构造携带学号并建实例专用管道，`send(crop)`/`poll()` 为实例方法，模块级全局状态全部收敛为实例字段；`configure`/`reset` 模块函数删除，BaseSport 新增 `set_face_request_q`（镜像 `set_emit`），worker 的两处模块调用改为 `sport.set_face_request_q(...)`；门禁在会话首帧以 `task.get_uid()` 实例化（`start` 不带 uid），`sport.reset()`/`close()` 丢弃旧实例——原 `reset()` 的"清状态+排空管道"语义由换实例承担。验证：`py_compile` 4 文件过，grep 无模块级调用残留。
+- 同日修订（第二轮，用户指正）：**门禁归属与 phase 收敛**——`_face_gate` 改名 `face_recognition(student_id, crop)` 连同 `_face_ok` 移入 FaceClient，`_crop` 移入 Evaluator（新增 `_face_admitted` 裁剪后询门禁）；sport 删 `_send_phase`/`_face_gate`/`_crop`/`_face_on`/`_face_ok`，`BaseSport` 删 `set_emit`/`set_face_request_q`、仅余 `set_face_client`——FaceClient 改由 **worker 启动时实例化**（`FaceClient(face_request_q) if face_request_q else None`）、每会话 `reset()`。**phase 消息收敛**：只留模型加载通知 `{'type':'phase','phase':'加载','value':True|False}`（reset 后 True；load 失败 False），`ready`/`face`/`face_result` 全部退出 phase 通道（`ready`→`加载` 消除与 `data.ready` 的歧义）；人脸结论改经 `FaceClient.status()` 随 Evaluator 返回值 **`data.face`**（`state`: checking/passed/failed/timeout）逐帧承载。user_manager（置 `session.ready`/晚到补发）与 websocket 转发同步改名；前端 `StudentTestingSitup.vue` phase 分支收敛为"加载"、人脸提示改由 `data.face.state` 变化驱动（新增 `lastFaceState` 边沿跟踪，会话重置清零）。验证：`py_compile` 6 文件过、全仓无 `set_emit/_send_phase/_face_gate/ready_gate/phase:ready` 残留、`npm run build` 过（10.38s）。
+- 同日修订（第三轮，用户指正）：加载通知信封简化——`{'type':'phase','phase':'加载','value':…}` → **`{'type':'loaded','value':…}`**（type 即语义，`phase` 字段与 `phase` 信封整体取消）；`websocket.phase` 转发器改为 `websocket.loaded`，`user_manager` 泵分支改 `mtype=='loaded'`（整条消息直转 channel），晚到补发同改，前端分支改 `msg.type === "loaded"`。验证：`py_compile` 3 文件过、前后端 grep 无 `'phase'` 消息残留（jump debug 的 `phase` 字段无关）、`npm run build` 过（9.17s）。
+
+---
+
+## 追加改动（2026-11-05）：situp 进入流程改两阶段（坐姿+人脸 → 躺下）
+
+- 动机（用户）：原流程"躺下合格 → 人脸"自相矛盾——人脸要坐着拍。改为 **阶段一** 坐姿合格即启动人脸：`_sit_ok`（臀部贴地：不高于脚踝 40px；双腿屈膝：双膝高于脚踝 20px，排除伸直）→ `_face_admitted` → `face_recognition`，过人脸置 `face_done`；**阶段二** 提示"请平躺" → 原躺下判定（肩/头/脚贴地线连续 10 帧 + 躯干-脚底夹角差≤10 再 10 帧）→ READY。
+- 连带修正：地面线拟合缓存与红色拟合线在坐姿阶段**冻结**（坐姿下的肩-踝拟合无意义，会污染阶段二判定与画面）；环境判定块按 `face_done` 分段；hints 分支改为阶段一"请坐下，双腿屈膝固定，准备测试"、阶段二(0/-4)"请平躺，双腿保持不动"，`测试环境检测中/请准备` 与单字"请平躺"退役，-1/-2/-3 异常提示保留。
+- 前端：`人脸识别通过`→`人脸识别完成`，`is_waiting_for_flat` 语音改"请平躺，双腿保持不动"；`data.face` 四态提示与 `data.ready` 读秒逻辑不变。**Evaluator 返回值本轮无需新增键**（hints + data.face 已覆盖四条通知）。
+- 验证：`py_compile` 过；**两阶段流转冒烟 ALL PASS（8 项）**：站立出"请坐下"且不判坐姿、坐姿置 `face_done` 仍 WAITING、躺下 10+10 帧转 READY、返回 `ready=True`、人脸过后出"请平躺"；`npm run build` 过（9.18s）。未覆盖：真人姿态阈值（40px/20px）实拍校准。
+
+---
+
+## 追加改动（2026-11-05）：State 枚举重构 + 人脸失败第 3 次才提示
+
+- **状态机**（用户）：`WAITING/READY/…` → **`WAIT`（等待坐下）/`FACE`（人脸核验中）/`READY`（识别通过等待躺下）/`FLAT`/`RISE`/`WAIT_FLAT`/`FINISHED`**（数值整体后移一位）；`face_done` 字段删除——由 `READY` 状态取代（`state == READY` 即人脸已过）。连带键位调整：测试阶段门 `>= READY` → `>= FLAT`；`ready` 返回值 `>= READY` → `>= FLAT`（触发时刻 = 躺下合格，与原行为同帧，前端倒计时不受影响）；躺下合格直转 `FLAT`（取消原"进 READY 等 is_flat 确认"的中间帧——躺下门的 10 帧贴地线已含等效确认）；平躺判定列表移除不可达的 `READY`；地面线拟合更新键到 `READY` 阶段（坐姿与测试期冻结）；作弊提示门 `>= FLAT`。
+- **失败计数展示**（用户）：`FaceClient` 新增 `_fail_count`（会话内 `failed`/`timeout` 判定累计，`reset` 清零），`status()` 注入 `fail_count` 随 `data.face` 下发；前端仅当 `fail_count >= 3` 才显示"人脸识别未通过，请重试"——前两次静默重试（维持"正在进行人脸识别"提示），通过时照常切"人脸识别完成"。
+- 验证：`py_compile` 过；**状态机+计数冒烟 ALL PASS（13 项）**：WAIT+请坐下 → 坐姿过人脸转 READY（face_done 取代验证）+请平躺+`ready=False` → 躺下转 FLAT+`ready=True`；FaceClient 自管道注入三连失败 count 1→2→3、通过后计数保留、reset 清零；`npm run build` 过（9.09s）。遗留观察：躺姿坐标头朝左时躯干角≈177°→修正角 60°会直转 RISE——旧流程同几何会卡死在 READY，均依赖生产"头朝右"机位（既有约束，非本批引入）。

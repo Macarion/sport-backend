@@ -11,7 +11,8 @@ import threading
 import time
 import multiprocessing as mp
 
-from core.config import IDLE_TIMEOUT
+from core.config import FACE_GATE_ENABLED, IDLE_TIMEOUT
+from core.face_service import get_request_q
 from core.log import get_logger
 from core.registry import is_registered
 from core.shm import SlotSet, attach_slot
@@ -33,9 +34,11 @@ class _Session:
         self.in_q = in_q if in_q is not None else mp.Queue()
         self.out_q = out_q if out_q is not None else mp.Queue()
         if proc is None:
-            proc = mp.Process(target=run_user_worker,
-                              args=(sport_type, self.in_q, self.out_q),
-                              daemon=True)
+            proc = mp.Process(
+                target=run_user_worker,
+                args=(sport_type, self.in_q, self.out_q,
+                      get_request_q() if FACE_GATE_ENABLED else None),
+                daemon=True)
         self.proc = proc            # 来自驻留池时复用既有进程与队列
         self.error_seen = False     # error 路径不归池（ADR-0003）
         self.lock = threading.Lock()   # 保护 free_slots / slot_shapes / frame_id
@@ -279,7 +282,7 @@ class UserManager:
         if self._loop is None:
             self._loop = asyncio.get_event_loop()
         self._ensure_pump(uid)
-        # 若用户进程在 WS 注册前已就绪，补发 phase（否则前端只能等首帧 data）
+        # 若用户进程在 WS 注册前已就绪，补发 loaded（否则前端只能等首帧 data）
         session = self._sessions.get(uid)
         if session is None:
             # 会话已收口（含进程死亡后才接入的 WS）：直接补发 end，前端不悬挂
@@ -287,7 +290,7 @@ class UserManager:
                                               {'type': 'test_end'})
         elif session.ready:
             await consumer.channel_layer.send(consumer.channel_name,
-                                              {'type': 'phase', 'phase': 'ready'})
+                                              {'type': 'loaded', 'value': True})
 
     def unregister_consumer(self, uid):
         # WS 断线是销毁触发器之一：等价于停止测试
@@ -403,14 +406,13 @@ class UserManager:
                     continue
 
                 mtype = msg.get('type')
-                if mtype == 'phase':
-                    session.ready = True
-                    log.info('用户进程就绪: uid=%s', uid)
+                if mtype == 'loaded':
+                    if msg.get('value'):
+                        session.ready = True
+                        log.info('用户进程就绪: uid=%s', uid)
                     consumer = self._consumers.get(uid)
                     if consumer is not None:
-                        await consumer.channel_layer.send(
-                            consumer.channel_name,
-                            {'type': 'phase', 'phase': msg.get('phase', 'ready')})
+                        await consumer.channel_layer.send(consumer.channel_name, msg)
                 elif mtype == 'result':
                     await self._on_result(session, msg, loop)
                 elif mtype == 'finished':
