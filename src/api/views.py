@@ -61,7 +61,7 @@ from api.user_manager import user_manager
 from core.config import CAMERA_INDEX, REPORT_DIR
 from django.http import JsonResponse, HttpResponse
 
-from .sitreach import (
+from src.sports.sitreach import (
     sitreach_start,
     sitreach_process_frame,
     sitreach_fetch_inc_data,
