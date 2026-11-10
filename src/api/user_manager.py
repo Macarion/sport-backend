@@ -15,7 +15,7 @@ from core.config import FACE_GATE_ENABLED, IDLE_TIMEOUT
 from core.face_service import get_request_q
 from core.log import get_logger
 from core.registry import is_registered
-from core.shm import SlotSet, attach_slot
+from core.shm import MAX_FRAME_BYTES, SlotSet, attach_slot
 from core.task import SportTask
 from worker.run_user_worker import run_user_worker
 
@@ -48,6 +48,8 @@ class _Session:
         self.config = {}
         self.ready = False
         self.finalized = False
+        self.finalizing = False
+        self.input_shape = None
         self.stopping_at = None
         self.last_active = time.time()
         self.push_ok = 0
@@ -89,7 +91,7 @@ class UserManager:
         if old is not None:
             log.warning('uid=%s 已有会话，先停止旧会话', uid)
             self._request_stop(old)
-            if old.pump is not None and not old.pump.done():
+            if old.finalizing or (old.pump is not None and not old.pump.done()):
                 # 旧 pump 持有 out_q 读者位：等它收口（归池/销毁）再建新会话，
                 # 否则两个读者会分抢 finished 回执（也修掉同 uid 快速重测的竞态）
                 if not self._wait_finalized(old, timeout=5):
@@ -125,13 +127,15 @@ class UserManager:
 
     def stop_sport_test(self, uid):
         uid = str(uid)
-        session = self._sessions.pop(uid, None)
+        session = self._sessions.get(uid)
         if session is None:
             return
         self._request_stop(session)
         if session.pump is None or session.pump.done():
             # 没有结果轮询在跑（WS 未注册或 pump 已退出）：就地收尾
             self._finalize(session)
+            if self._sessions.get(uid) is session:
+                self._sessions.pop(uid, None)
         log.info('用户停止测试: uid=%s', uid)
 
     def shutdown_all(self):
@@ -169,11 +173,14 @@ class UserManager:
         log.info('全部用户会话与驻留池已销毁')
 
     def _request_stop(self, session):
-        session.stopping_at = time.time()
-        try:
-            session.in_q.put({'type': 'stop'})
-        except Exception as e:
-            log.error('发送停止信号失败: uid=%s err=%s', session.uid, e)
+        with session.lock:
+            if session.stopping_at is not None:
+                return
+            session.stopping_at = time.time()
+            try:
+                session.in_q.put({'type': 'stop'})
+            except Exception as e:
+                log.error('发送停止信号失败: uid=%s err=%s', session.uid, e)
 
     def _finalize(self, session, marker_seen=False):
         """收口会话：干净结束（finished 已确认且进程存活）→ 归池驻留；否则销毁。
@@ -181,9 +188,10 @@ class UserManager:
         marker_seen=True 表示 finished 回执已被 pump 读到；无 pump 读者时本方法
         自行等待回执。幂等。
         """
-        if session.finalized:
-            return
-        session.finalized = True
+        with session.lock:
+            if session.finalized or session.finalizing:
+                return
+            session.finalizing = True
 
         pooled = False
         try:
@@ -220,6 +228,9 @@ class UserManager:
             session.slots.destroy()
         except Exception as e:
             log.error('销毁共享内存槽失败: %s', e)
+        finally:
+            session.finalized = True
+            session.finalizing = False
 
     @staticmethod
     def _drain(q):
@@ -278,13 +289,18 @@ class UserManager:
 
     async def register_consumer(self, consumer):
         uid = str(consumer.uid)
-        self._consumers[uid] = consumer
         if self._loop is None:
             self._loop = asyncio.get_event_loop()
-        self._ensure_pump(uid)
+        # A stopping session may have a finalizer reading out_q already.
+        # Reject the connection before registering it or starting another reader.
+        if not self._ensure_pump(uid):
+            await consumer.channel_layer.send(consumer.channel_name,
+                                              {'type': 'test_end'})
+            return
+        self._consumers[uid] = consumer
         # 若用户进程在 WS 注册前已就绪，补发 loaded（否则前端只能等首帧 data）
         session = self._sessions.get(uid)
-        if session is None:
+        if session is None or session.stopping_at is not None or session.finalizing:
             # 会话已收口（含进程死亡后才接入的 WS）：直接补发 end，前端不悬挂
             await consumer.channel_layer.send(consumer.channel_name,
                                               {'type': 'test_end'})
@@ -292,8 +308,10 @@ class UserManager:
             await consumer.channel_layer.send(consumer.channel_name,
                                               {'type': 'loaded', 'value': True})
 
-    def unregister_consumer(self, uid):
+    def unregister_consumer(self, uid, consumer=None):
         # WS 断线是销毁触发器之一：等价于停止测试
+        if consumer is not None and self._consumers.get(str(uid)) is not consumer:
+            return
         self._consumers.pop(str(uid), None)
         self.stop_sport_test(uid)
 
@@ -308,13 +326,25 @@ class UserManager:
 
     # ---------- 帧入（WebRTC 收流线程 / executor 调用）----------
 
-    def push_frame(self, uid, frame):
+    def push_frame(self, uid, frame, timestamp_ms=None):
         uid = str(uid)
         session = self._sessions.get(uid)
-        if session is None or session.finalized:
+        if session is None or session.finalized or session.finalizing or session.stopping_at is not None:
             return False
+        if frame.ndim != 3 or frame.shape[2] != 3 or frame.dtype.name != "uint8":
+            raise ValueError("Video must be uint8 BGR")
+        if frame.nbytes > MAX_FRAME_BYTES:
+            raise ValueError("视频超过共享内存容量，请使用 1280×720 或更低分辨率")
+        if session.sport_type == "jump":
+            if frame.shape[0] > 720 or frame.shape[1] > 1280:
+                raise ValueError("跳远视频必须不超过 1280×720")
+            if session.input_shape is not None and tuple(frame.shape) != session.input_shape:
+                raise ValueError("摄像头分辨率已变化，请重新启动跳远标定")
+            session.input_shape = tuple(frame.shape)
 
         with session.lock:
+            if session.finalized or session.finalizing or session.stopping_at is not None:
+                return False
             if not session.free_slots:
                 session.push_drop += 1   # 4 槽全在途：丢帧（loading 期 / 背压）
                 self._rate(session)
@@ -324,26 +354,26 @@ class UserManager:
             frame_id = session.frame_id
             session.frame_id += 1
 
-        try:
-            shm, arr = attach_slot(slot, frame.shape)
-            arr[:] = frame
-            shm.close()
-        except Exception as e:
-            log.error('写入共享内存槽失败: %s', e)
-            with session.lock:
+            try:
+                shm, arr = attach_slot(slot, frame.shape)
+                arr[:] = frame
+                shm.close()
+            except Exception as e:
+                log.error('写入共享内存槽失败: %s', e)
                 session.slot_shapes.pop(slot, None)
                 session.free_slots.append(slot)
-            session.push_drop += 1
-            self._rate(session)
-            return False
+                session.push_drop += 1
+                self._rate(session)
+                return False
 
-        task = SportTask(uid, frame_id, session.sport_type,
-                         slot, frame.shape, session.config)
-        session.in_q.put({'type': 'task', 'task': task.to_dict()})
-        session.last_active = time.time()
-        session.push_ok += 1
-        self._rate(session)
-        return True
+            task = SportTask(uid, frame_id, session.sport_type,
+                             slot, frame.shape, dict(session.config),
+                             timestamp_ms=timestamp_ms if timestamp_ms is not None else int(time.time() * 1000))
+            session.in_q.put({'type': 'task', 'task': task.to_dict()})
+            session.last_active = time.time()
+            session.push_ok += 1
+            self._rate(session)
+            return True
 
     @staticmethod
     def _rate(session):
@@ -359,11 +389,18 @@ class UserManager:
 
     def _ensure_pump(self, uid):
         session = self._sessions.get(uid)
-        if session is None or session.finalized:
-            return
-        if session.pump is not None and not session.pump.done():
-            return
-        session.pump = asyncio.ensure_future(self._pump(session))
+        if session is None:
+            return False
+        # Serialize pump publication with _request_stop/_finalize. If stop wins,
+        # no new reader can start; if this wins, stop observes the existing pump
+        # and leaves it as the sole reader until finished.
+        with session.lock:
+            if (self._sessions.get(uid) is not session or session.finalized
+                    or session.finalizing or session.stopping_at is not None):
+                return False
+            if session.pump is None or session.pump.done():
+                session.pump = asyncio.ensure_future(self._pump(session))
+            return True
 
     @staticmethod
     def _get_msg(session):
@@ -400,8 +437,6 @@ class UserManager:
                             and time.time() - session.last_active > IDLE_TIMEOUT):
                         log.info('会话空闲 %d 秒，自动停止归池: uid=%s',
                                  IDLE_TIMEOUT, uid)
-                        if self._sessions.get(uid) is session:
-                            self._sessions.pop(uid, None)
                         self._request_stop(session)
                     continue
 
@@ -431,13 +466,15 @@ class UserManager:
             # 同 uid 快速重测：新会话已接管时，旧泵不得弹掉新条目/新消费者
             current = self._sessions.get(uid)
             replaced = current is not None and current is not session
-            if current is session:
-                self._sessions.pop(uid, None)
             consumer = None
             if not replaced:
                 consumer = self._consumers.pop(uid, None)
             await loop.run_in_executor(
                 None, lambda: self._finalize(session, marker_seen=finished_seen))
+            # Keep the stopping session discoverable until its named SHM slots
+            # are destroyed, so an immediate restart waits before allocating them.
+            if self._sessions.get(uid) is session:
+                self._sessions.pop(uid, None)
             if consumer is not None:
                 try:
                     await consumer.channel_layer.send(consumer.channel_name,
@@ -456,18 +493,25 @@ class UserManager:
         if slot:
             with session.lock:
                 shape = session.slot_shapes.pop(slot, None)
-                if slot not in session.free_slots:
-                    session.free_slots.append(slot)   # 槽归还（先于投递，尽快复用）
-            frame = await loop.run_in_executor(None, self._read_slot, slot, shape)
-            consumer = self._consumers.get(session.uid)
-            if frame is not None and consumer is not None:
-                consumer.output_track.push_frame(frame)
+            if shape is not None:
+                try:
+                    # Keep the slot busy until its pixels have been privately copied.
+                    frame = await loop.run_in_executor(None, self._read_slot, slot, shape)
+                finally:
+                    with session.lock:
+                        if slot not in session.free_slots:
+                            session.free_slots.append(slot)
+                consumer = self._consumers.get(session.uid)
+                if (frame is not None and consumer is not None and session.stopping_at is None
+                        and self._sessions.get(session.uid) is session):
+                    consumer.output_track.push_frame(frame)
 
         data = msg.get('data')
         if data is None:
             session.res_none = getattr(session, 'res_none', 0) + 1
         consumer = self._consumers.get(session.uid)
-        if data is not None and consumer is not None:
+        if (data is not None and consumer is not None and session.stopping_at is None
+                and self._sessions.get(session.uid) is session):
             await consumer.channel_layer.send(consumer.channel_name,
                                               {'type': 'eval_result', 'data': data})
 

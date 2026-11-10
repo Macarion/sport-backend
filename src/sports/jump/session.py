@@ -29,6 +29,10 @@ class FastReadyConfig:
     max_jump_seconds: float = 8.0
     takeoff_min_px: float = 30.0
     takeoff_image_ratio: float = 0.03
+    dynamic_armed_baseline: bool = True
+    armed_baseline_window: int = 5
+    armed_baseline_update_margin_ratio: float = 0.5
+    single_frame_takeoff_ratio: float = 2.5
     landing_stable_frames: int = 3
     landing_max_change_px: float = 15.0
     min_forward_cm: float = 30.0
@@ -114,11 +118,12 @@ class FastReadyWebSession:
         output_root: Path,
         temp_root: Optional[Path] = None,
         config: Optional[FastReadyConfig] = None,
+        face_client=None,
     ):
         self.uid = str(uid)
         self.session_id = uuid.uuid4().hex
         self.config = config or FastReadyConfig()
-        self.output_dir = output_root / self.uid / self.session_id
+        self.output_dir = output_root / self._safe_filename_part(self.uid) / self.session_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.temp_root = temp_root or output_root.parent / "temp"
         self.temp_root.mkdir(parents=True, exist_ok=True)
@@ -128,6 +133,11 @@ class FastReadyWebSession:
         )
 
         self.lock = threading.Lock()
+        self.face_client = face_client
+        self._face_target = False
+        self._cancel = threading.Event()
+        self._closed = False
+        self._close_deadline = None
         # 单独保护原始帧环形缓冲：入缓冲只用这把锁，绝不与跑 YOLO 的 self.lock 竞争，
         # 这样 WebRTC 事件循环上的 ingest 永远不会被分析线程的长时间持锁卡住。
         self.raw_lock = threading.Lock()
@@ -148,6 +158,7 @@ class FastReadyWebSession:
         self.plane = None
 
         self.fast_ready_samples = deque(maxlen=max(1, self.config.auto_ready_frames))
+        self.armed_baseline_y2_values = deque(maxlen=max(1, int(self.config.armed_baseline_window)))
         self.baseline_y2: Optional[float] = None
         self.ready_world_point: Optional[np.ndarray] = None
         self.locked_bbox: Optional[List[int]] = None
@@ -301,16 +312,19 @@ class FastReadyWebSession:
         self.stream_last_frame_at = timestamp_sec
         if self.state in self.TERMINAL_STATES:
             return
-        # 不在事件循环上编码：仅把帧引用塞进队列（to_ndarray 已是我方独占数组，无需 copy），
+        # 共享内存槽会复用，必须在返回前复制原始像素给后台编码器。
         # 由后台 encoder 线程编码+入缓冲。队列满（持续过载）时丢最新帧并计数，绝不阻塞循环。
         try:
-            self._raw_encode_queue.put_nowait((frame, int(frame_id), timestamp_ms))
+            self._raw_encode_queue.put_nowait((frame.copy(), int(frame_id), timestamp_ms))
         except queue.Full:
             self.raw_encode_dropped += 1
 
     def _raw_encoder_loop(self) -> None:
-        while True:
-            item = self._raw_encode_queue.get()
+        while not self._cancel.is_set():
+            try:
+                item = self._raw_encode_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
             if item is None:
                 break
             frame, frame_id, timestamp_ms = item
@@ -475,39 +489,57 @@ class FastReadyWebSession:
             return response
 
     def stop(self, message: str = "测试已主动停止") -> Dict[str, Any]:
+        # Signal first, then join outside self.lock: the measurement thread uses it too.
+        self._cancel.set()
+        if self._close_deadline is None:
+            self._close_deadline = time.monotonic() + 4.0
         with self.lock:
             if self.state not in self.TERMINAL_STATES:
                 self.state = "STOPPED"
                 self.message = message
                 self.error = None
-                self.pause_frame_id = self.last_frame_id
-                # 终态时间也用帧时钟，避免与 last_timestamp_ms 混算出垃圾 elapsed。
-                if self.last_timestamp_ms is not None:
-                    self.state_started_at = int(self.last_timestamp_ms) / 1000.0
-            response = self._response(frame_id=self.last_frame_id, message=self.message)
-            self._write_diag_event(
-                {
-                    "event": "session_stopped",
-                    "event_zh": "会话主动停止",
-                    "reason_zh": self.message,
-                    "frame_id": self.last_frame_id,
-                    "state": self.state,
-                    "message": self.message,
-                    "error": self.error,
-                }
-            )
-            self._close_background_workers()
-            return response
+            response = self._response(frame_id=self.last_frame_id)
+            if not self._closed:
+                self._write_diag_event({"event": "session_stopped", "state": self.state})
+                self._closed = True
+                self._diag_queue.put_nowait(None)
+        threads = (self.processing_thread, self._raw_encoder, self._diag_writer)
+        for thread in threads:
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0, self._close_deadline - time.monotonic()))
+        if any(t is not None and t.is_alive() for t in threads):
+            raise RuntimeError("Jump cleanup timed out; worker cannot be reused")
+        with self.raw_lock:
+            self.raw_frames.clear()
+            self.raw_frames_bytes = 0
+        while True:
+            try:
+                self._raw_encode_queue.get_nowait()
+            except queue.Empty:
+                break
+        self.jump_samples.clear()
+        self.review_samples.clear()
+        return response
 
-    def _close_background_workers(self) -> None:
-        try:
-            self._raw_encode_queue.put(None, timeout=0.1)
-        except Exception:
-            pass
-        try:
-            self._diag_queue.put_nowait(None)
-        except Exception:
-            pass
+    def _check_cancelled(self):
+        if self._cancel.is_set():
+            raise RuntimeError("Jump session cancelled")
+
+    def _reset_face_target(self):
+        if self._face_target and self.face_client is not None:
+            self.face_client.reset()
+        self._face_target = False
+
+    def _face_admitted(self, frame, selected):
+        if self.face_client is None:
+            return True
+        self._face_target = True
+        h, w = frame.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in selected.bbox]
+        x1, x2 = max(0, x1), min(w, x2)
+        y1, y2 = max(0, y1), min(h, y2)
+        crop = frame[y1:y2, x1:x2].copy() if x2 > x1 and y2 > y1 else None
+        return self.face_client.face_recognition(self.uid, crop)
 
     def _handle_calibrating(self, frame, frame_id: int, timestamp_ms: int) -> Dict[str, Any]:
         import cv2
@@ -584,6 +616,7 @@ class FastReadyWebSession:
 
         self.last_painting = self._people_painting(detections, selected)
         if selected is None or selected.bottom_center_world is None:
+            self._reset_face_target()
             self.fast_ready_samples.clear()
             self.message = "等待测试人进入画面"
             self.frame_diagnostics["reason_zh"] = "起跳准备阶段未检测到可用测试人"
@@ -596,7 +629,8 @@ class FastReadyWebSession:
                 previous,
                 max_center_distance_px=self.config.max_track_distance_px,
             )
-            if matched is None:
+            if matched is None or (self._face_target and realtime.bbox_iou(selected.bbox, previous) < 0.1):
+                self._reset_face_target()
                 self.fast_ready_samples.clear()
 
         self.fast_ready_samples.append(selected)
@@ -606,6 +640,10 @@ class FastReadyWebSession:
             self.frame_diagnostics["reason_zh"] = "测试人已检测到，等待连续准备帧满足要求"
             return self._response(frame_id=frame_id)
 
+        if not self._face_admitted(frame, selected):
+            self.message = "正在核验身份，请面向摄像头"
+            return self._response(frame_id=frame_id)
+
         points = np.array(
             [sample.bottom_center_world for sample in self.fast_ready_samples],
             dtype=np.float32,
@@ -613,11 +651,38 @@ class FastReadyWebSession:
         self.baseline_y2 = float(np.median([sample.y2 for sample in self.fast_ready_samples]))
         self.ready_world_point = np.median(points, axis=0)
         self.locked_bbox = list(self.fast_ready_samples[-1].bbox)
+        self.armed_baseline_y2_values.clear()
+        for sample in self.fast_ready_samples:
+            self.armed_baseline_y2_values.append(float(sample.y2))
         self.takeoff_y2_values.clear()
         self._transition("ARMED", timestamp_ms / 1000.0)
         self.message = "可以开始起跳"
         self.frame_diagnostics["reason_zh"] = "准备帧满足要求，进入可以起跳状态"
         return self._response(frame_id=frame_id)
+
+    def _update_armed_baseline(self, active_y2: float, threshold: float):
+        """Match wcx_jump's ground-only, nondecreasing baseline correction."""
+        if not self.config.dynamic_armed_baseline:
+            return float(self.baseline_y2), False, "disabled"
+
+        old_baseline = float(self.baseline_y2)
+        active_y2 = float(active_y2)
+        # y2 grows downward. Exclude clearly airborne observations from the window.
+        update_margin = threshold * float(self.config.armed_baseline_update_margin_ratio)
+        if active_y2 >= old_baseline - update_margin:
+            self.armed_baseline_y2_values.append(active_y2)
+        if not self.armed_baseline_y2_values:
+            return old_baseline, False, "empty"
+
+        candidate = float(max(self.armed_baseline_y2_values))
+        new_baseline = max(old_baseline, candidate)
+        changed = new_baseline > old_baseline
+        if changed:
+            self.baseline_y2 = new_baseline
+        return new_baseline, changed, (
+            f"candidate={candidate:.1f},samples="
+            f"{[int(value) for value in self.armed_baseline_y2_values]}"
+        )
 
     def _handle_armed(self, frame, frame_id: int, timestamp_ms: int) -> Dict[str, Any]:
         algos = get_algorithms()
@@ -660,22 +725,38 @@ class FastReadyWebSession:
             float(self.config.takeoff_min_px),
             float(frame.shape[0]) * float(self.config.takeoff_image_ratio),
         )
-        self.debug_info = {
-            "phase": "takeoff_detection",
-            "baseline_y2": float(self.baseline_y2),
-            "active_y2": float(active.y2),
-            "takeoff_delta_px": float(self.baseline_y2 - active.y2),
-            "takeoff_threshold_px": takeoff_threshold,
-            "recent_y2": [float(value) for value in self.takeoff_y2_values],
-        }
-        self.frame_diagnostics.update(self.debug_info)
-        if realtime.detect_takeoff(
+        baseline_before = float(self.baseline_y2)
+        _, baseline_changed, baseline_reason = self._update_armed_baseline(active.y2, takeoff_threshold)
+        rise = float(self.baseline_y2) - float(active.y2)
+        two_frame_takeoff = realtime.detect_takeoff(
             self.takeoff_y2_values,
             baseline_y2=float(self.baseline_y2),
             frame_height=frame.shape[0],
             min_pixels=self.config.takeoff_min_px,
             image_ratio=self.config.takeoff_image_ratio,
-        ):
+        )
+        strong_threshold = takeoff_threshold * float(self.config.single_frame_takeoff_ratio)
+        strong_single_takeoff = (
+            float(self.config.single_frame_takeoff_ratio) > 0 and rise >= strong_threshold
+        )
+        takeoff_reason = (
+            "single_frame_strong" if strong_single_takeoff else "two_frame" if two_frame_takeoff else "none"
+        )
+        self.debug_info = {
+            "phase": "takeoff_detection",
+            "baseline_before_y2": baseline_before,
+            "baseline_changed": baseline_changed,
+            "baseline_update_reason": baseline_reason,
+            "baseline_y2": float(self.baseline_y2),
+            "active_y2": float(active.y2),
+            "takeoff_delta_px": rise,
+            "takeoff_threshold_px": takeoff_threshold,
+            "strong_takeoff_threshold_px": strong_threshold,
+            "takeoff_reason": takeoff_reason,
+            "recent_y2": [float(value) for value in self.takeoff_y2_values],
+        }
+        self.frame_diagnostics.update(self.debug_info)
+        if two_frame_takeoff or strong_single_takeoff:
             self.jump_samples = []
             self.review_samples = []
             self.review_summary = {}
@@ -691,7 +772,7 @@ class FastReadyWebSession:
             return self._response(frame_id=frame_id)
 
         self.message = "可以开始起跳"
-        self.frame_diagnostics["reason_zh"] = "起跳条件未满足：最近两帧未同时超过阈值"
+        self.frame_diagnostics["reason_zh"] = "起跳条件未满足：连续两帧上升或强上升单帧条件均未满足"
         return self._response(frame_id=frame_id)
 
     def _handle_in_jump(self, frame, frame_id: int, timestamp_ms: int) -> Dict[str, Any]:
@@ -846,7 +927,7 @@ class FastReadyWebSession:
         try:
             result = self._run_measurement()
             with self.lock:
-                if self.state == "FAILED":
+                if self._cancel.is_set() or self.state in {"FAILED", "STOPPED"}:
                     return
                 self.result_payload = result
                 self.score_cm = float(result["score_cm"])
@@ -869,6 +950,8 @@ class FastReadyWebSession:
                 )
         except Exception as exc:
             with self.lock:
+                if self._cancel.is_set():
+                    return
                 self.processing_error = str(exc)
                 self._set_failed(f"成绩计算失败: {exc}")
                 self._write_diag_event(
@@ -911,11 +994,9 @@ class FastReadyWebSession:
 
         landing_path = self.output_dir / "landing_frame.jpg"
         cv2.imwrite(str(landing_path), landing_frame)
-        segmentation_info = realtime.segment_with_loaded_predictor(
-            models=models,
-            landing_frame=landing_frame,
-            prompt_box=expanded_bbox,
-        )
+        self._check_cancelled()
+        segmentation_info = models.segmenter.predict(landing_frame, expanded_bbox)
+        self._check_cancelled()
         output_paths = realtime.save_segmentation_outputs(
             landing_frame,
             segmentation_info["mask"],
@@ -937,41 +1018,14 @@ class FastReadyWebSession:
             calib_image_path=self.calibration_path,
         )
 
-        # 把“真正用于测距的落地帧”编码成缩略图随结果回传，让前端出结果时把它画成底图，
-        # 叠加 painting（脚跟/人框/成绩），而不是停在 2 秒录制末帧上只冒一个红点。
-        landing_preview = None
-        try:
-            import base64
-
-            preview_img = landing_frame
-            height, width = landing_frame.shape[:2]
-            # 限制在 720 宽 / q72：base64 后约几十 KB，稳妥落在 WebRTC DataChannel 单条消息上限内；
-            # 前端画布是原生分辨率，预览图会拉伸铺满，painting 坐标仍按原生像素对齐。
-            max_width = 720
-            if width > max_width:
-                scale = max_width / float(width)
-                preview_img = cv2.resize(
-                    landing_frame,
-                    (max_width, max(1, int(round(height * scale)))),
-                    interpolation=cv2.INTER_AREA,
-                )
-            ok_preview, preview_buf = cv2.imencode(
-                ".jpg", preview_img, [int(cv2.IMWRITE_JPEG_QUALITY), 72]
-            )
-            if ok_preview:
-                landing_preview = "data:image/jpeg;base64," + base64.b64encode(
-                    preview_buf.tobytes()
-                ).decode("ascii")
-        except Exception as exc:
-            print(f"[jump landing preview skipped] {exc}")
-
+        self._check_cancelled()
         payload = {
+            "segmentation": {k: v for k, v in segmentation_info.items() if k != "mask"},
             "uid": self.uid,
             "session_id": self.session_id,
             "state": "RESULT",
             "score_cm": float(measurement.score_cm),
             "landing_frame_id": int(landing_sample.packet.index),
-            "landing_frame_preview": landing_preview,
             "landing_frame_size": [
                 int(landing_frame.shape[1]),
                 int(landing_frame.shape[0]),
@@ -1058,6 +1112,7 @@ class FastReadyWebSession:
         yolo_started_at = time.perf_counter()
 
         for raw_packet in raw_packets:
+            self._check_cancelled()
             if float(raw_packet.timestamp_sec) < float(self.takeoff_timestamp_sec):
                 continue
             reviewed_frame_count += 1
@@ -1382,6 +1437,8 @@ class FastReadyWebSession:
         self._write_diag_event(event)
 
     def _write_diag_event(self, event: Dict[str, Any]) -> None:
+        if self._closed:
+            return
         # 在调用线程里做廉价且能立即快照当前内容的序列化，把昂贵的磁盘 I/O 交给后台线程，
         # 避免在 16fps 分析等热路径上反复 open/write/flush 文件。
         try:
@@ -1473,6 +1530,7 @@ class FastReadyWebSession:
     def _response(self, frame_id: Optional[Any], message: Optional[str] = None) -> Dict[str, Any]:
         payload = {
             "ok": self.error is None,
+            "face": self.face_client.status() if self.face_client else None,
             "uid": self.uid,
             "session_id": self.session_id,
             "frame_id": frame_id,

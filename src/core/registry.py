@@ -6,6 +6,7 @@
 import importlib
 
 SPORTS = {
+    'jump': 'sports.jump.sport.SportJump',
     'situp': 'sports.situp.SportSitup',
     'pullup': 'sports.pullup.SportPullup',
 }

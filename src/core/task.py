@@ -12,7 +12,7 @@ class SportTask:
     """
 
     def __init__(self, uid, frame_id, sport_type, shm_name=None, frame_shape=None,
-                 config=None, data=None):
+                 config=None, data=None, timestamp_ms=None):
         self.uid = uid
         self.frame_id = frame_id
         self.sport_type = sport_type
@@ -20,6 +20,7 @@ class SportTask:
         self.frame_shape = frame_shape
         self.config = config
         self.data = data
+        self.timestamp_ms = timestamp_ms
 
         self._shm = None
         self._frame = None
@@ -100,6 +101,7 @@ class SportTask:
             'frame_shape': self.frame_shape,
             'config': self.config,
             'data': self.data,
+            'timestamp_ms': self.timestamp_ms,
         }
 
     @classmethod
@@ -113,4 +115,5 @@ class SportTask:
             frame_shape=data.get('frame_shape'),
             config=data.get('config'),
             data=data.get('data'),
+            timestamp_ms=data.get('timestamp_ms'),
         )

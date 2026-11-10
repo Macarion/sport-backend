@@ -20,12 +20,16 @@ class BaseSport(ABC):
         """换会话复位评测状态（保留已加载模型，供下一个用户复用）。"""
 
     @abstractmethod
-    def process(self, frame, config, frame_id, uid=0):
+    def process(self, frame, config, frame_id, uid=0, timestamp_ms=None):
         """处理一帧（在共享内存帧上就地绘制），返回评测数据 dict；本帧无有效数据时返回 None。"""
 
     @abstractmethod
     def close(self):
         """释放模型与状态。"""
+
+    def end_session(self):
+        """Release session resources before the worker returns to the idle pool."""
+        pass
 
     def set_face_client(self, face_client):
         """注入人脸识别客户端（worker 启动时调用；不接人脸的项目自然无感）。"""

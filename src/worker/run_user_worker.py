@@ -84,10 +84,11 @@ def run_user_worker(sport_type, in_q, out_q, face_request_q=None):
                     frame_id = task.get_frame_id()
                     with task.link_frame():
                         data = sport.process(task.get_frame(), task.get_config(),
-                                             frame_id, task.get_uid())
+                                             frame_id, task.get_uid(), timestamp_ms=task.timestamp_ms)
                     out_q.put({'type': 'result', 'frame_id': frame_id,
                                'slot': task.get_shm_name(), 'data': data})
                 elif mtype == 'stop':
+                    sport.end_session()
                     out_q.put({'type': 'finished'})
                     break               # 回到外层：驻留等待下一个 start
                 elif mtype == 'start':

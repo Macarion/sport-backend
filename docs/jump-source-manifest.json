@@ -1,0 +1,108 @@
+{
+  "backend_base": "463f4c7fef31e35f0896e2ec3db8ada914e1cb94",
+  "frontend_base": "9f07e42f4ec19c12df71178406469c689f380c48",
+  "sources": [
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\vendor\\wcx\\realtime_aruco.py",
+      "target": "vendor/wcx/realtime_aruco.py",
+      "kind": "existing-web-algorithm",
+      "sha256": "439656fcf4c5a5caf74da7b3b9c846d0cf5d17e5318c5c30a91379460acccf95",
+      "target_sha256": "ed8fc3b6f80cf56273866ad507bb29ee622370967984974466bde04953291150",
+      "adaptation": "Retain only Web-required existing functions/classes and imports; omit standalone CLI and old model loaders. Rename debug box label."
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\vendor\\wcx\\arucotest\\aruco_measure.py",
+      "target": "vendor/wcx/arucotest/aruco_measure.py",
+      "kind": "existing-web-algorithm",
+      "sha256": "5a68c4d27a2b3e125e58a6a4e0a55b02ed949a3ac950195a8e3f10c0a615b101",
+      "target_sha256": "5a68c4d27a2b3e125e58a6a4e0a55b02ed949a3ac950195a8e3f10c0a615b101"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\vendor\\wcx\\arucotest\\pipeline_aruco.py",
+      "target": "vendor/wcx/arucotest/pipeline_aruco.py",
+      "kind": "existing-web-algorithm",
+      "sha256": "3883fb8adad6fb1d9858f9aed42713aaa184b3605e6f87de9defa66c55e26fbb",
+      "target_sha256": "52aa3ab0fc7583402dc89a942e1d5b82c17f98ae1595a2047b8b99fb0a8df955",
+      "adaptation": "Retain only Web-required existing functions/classes and imports; omit standalone CLI and old model loaders. Rename debug box label."
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\vendor\\wcx\\arucotest\\full_pipeline_aruco.py",
+      "target": "vendor/wcx/arucotest/full_pipeline_aruco.py",
+      "kind": "existing-web-algorithm",
+      "sha256": "230fc0126d738802780ecc93fa77fe6dfb0230146fdaa283549c067c5d7822a9",
+      "target_sha256": "a0df2eeb2217495e65ebe187b931f90fc18decd0254ce235d28de68e5b241967",
+      "adaptation": "Retain only Web-required existing functions/classes and imports; omit standalone CLI and old model loaders. Rename debug box label."
+    },
+    {
+      "source": "D:\\Python_Project\\wcx_jump\\models\\yolo11n.pt",
+      "target": "vendor/jump/yolo11n.pt",
+      "kind": "local-model",
+      "sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1",
+      "target_sha256": "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1"
+    },
+    {
+      "source": "D:\\Python_Project\\wcx_jump\\models\\yolo11n-seg.pt",
+      "target": "vendor/jump/yolo11n-seg.pt",
+      "kind": "local-model",
+      "sha256": "55ed65c56c91713d23e8402371c6c49a6fd84f257f7dce452e8d70e41dcbe152",
+      "target_sha256": "55ed65c56c91713d23e8402371c6c49a6fd84f257f7dce452e8d70e41dcbe152"
+    },
+    {
+      "source": "D:\\Python_Project\\wcx_jump\\src\\wcx_jump\\yolo_segmentation.py",
+      "target": "src/sports/jump/yolo_segmentation.py",
+      "kind": "local-yolo-adapter",
+      "sha256": "ca472a70a8422ae26381c0029b02706d97227b82c431db06b433a55f9a16bbfa",
+      "target_sha256": "dc41b810f816daa4a27453a93c7c179a02b7a6b2af38cee814d9f01975558bf4"
+    },
+    {
+      "source": "D:\\Python_Project\\wcx_jump\\src\\wcx_jump\\segmentation.py",
+      "target": "src/sports/jump/model_runtime.py",
+      "kind": "YOLO factory branch adapted",
+      "sha256": "5dc9fde4690b7916ab1404b1daafe776d78a770f729018ed659de435c954a6c5",
+      "target_sha256": "8f5eff45ba30e2425eaebc360945fcb6da346d64686b81ea5b4a4ec1b4a433dd"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\msyh.TTF",
+      "target": "vendor/fonts/msyh.ttf",
+      "kind": "runtime-font",
+      "sha256": "04e22ea954fd87d2e892b139311ed49b5d0b8a1d72085f15742ac6c6a78b8291",
+      "target_sha256": "04e22ea954fd87d2e892b139311ed49b5d0b8a1d72085f15742ac6c6a78b8291"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\backend\\msyhbd.ttf",
+      "target": "vendor/fonts/msyhbd.ttf",
+      "kind": "runtime-font",
+      "sha256": "ec6d23e0a5219c83e816d9373cefffc3fe9e42818e6966a1c73bbee45379f189",
+      "target_sha256": "ec6d23e0a5219c83e816d9373cefffc3fe9e42818e6966a1c73bbee45379f189"
+    },
+    {
+      "source": "D:\\Python_Project\\wcx_jump\\tests\\test_yolo_segmentation.py",
+      "target": "tests/test_yolo_adapter.py",
+      "kind": "YOLO contract tests adapted (CLI/backend choices excluded)",
+      "sha256": "911e5f1bd8661ddb08d925ac221e38e6a2fe4658da318c7afae63c0888bea5d7",
+      "target_sha256": "ae3f9c458dcb0cf7208e88ffccd6f96ddacf2c7c8e524d20454edbaf93006d94"
+    },
+    {
+      "source": "C:\\Users\\Rational\\.codex\\worktrees\\jump-multiprocess-backend\\backend\\src\\legacy\\new_jump.py",
+      "target": "src/sports/jump/painting.py",
+      "kind": "remote-baseline drawing helpers (unused data URL decoder omitted)",
+      "source_commit": "463f4c7fef31e35f0896e2ec3db8ada914e1cb94",
+      "sha256": "afa80a9f2d2c02c8b3420a88ecdbf279a1d5643e656000c942206f2ad3abd14e",
+      "target_sha256": "3fad69c50d093c12111b5e74ed801f234ed6bfe67ed464925cb7c4b99802f77c"
+    }
+  ],
+  "takeoff_policy_update": {
+    "date": "2026-11-10",
+    "source": "D:\\Python_Project\\wcx_jump\\src\\wcx_jump\\realtime_fast_ready.py",
+    "source_sha256": "a2b5b08a86f5dd65c987a6d871afa4c1a783a60962931f8a334bb4e1669981f7",
+    "target": "src/sports/jump/session.py",
+    "target_sha256": "2cd67ba737eaf9008c4c30bfa3ddd1c6fa2b519647ffd8eb730507c2f0487ea8",
+    "scope": "Partial migration: dynamic baseline window initialization/update and strong single-frame OR existing two-frame trigger. No runtime import of the local reference project.",
+    "defaults": {
+      "dynamic_armed_baseline": true,
+      "armed_baseline_window": 5,
+      "armed_baseline_update_margin_ratio": 0.5,
+      "single_frame_takeoff_ratio": 2.5
+    }
+  }
+}

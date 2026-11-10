@@ -1,0 +1,53 @@
+{
+  "archives": [
+    {
+      "path": "D:\\Python_Project\\ysj-project\\require\\sdk.zip",
+      "sha256": "fb3562e0ed7ab1c24b69c0a16df83c4463bf8ae0ee78587cc7cbd3ef197eb435",
+      "extracted_to": "D:\\Python_Project\\ysj-project\\require\\face_sdk"
+    },
+    {
+      "path": "D:\\Python_Project\\ysj-project\\require\\face_integration.zip",
+      "sha256": "09b40ae5a3ef7a5e7671fa7665685b433064b80454d07a838d481aa1028eb0a6",
+      "extracted_to": "D:\\Python_Project\\ysj-project\\require\\face_integration"
+    }
+  ],
+  "deployed": [
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\__init__.py",
+      "target": "vendor\\face_sdk\\__init__.py",
+      "sha256": "4122d10e821526a67877758a399051de9823a8a34b9ef79f38e11ec8ecabefb8"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\face_sdk.py",
+      "target": "vendor\\face_sdk\\face_sdk.py",
+      "sha256": "39257e3b6ed2a7640a9a4afef02d11205a10dec6c552834dc588ae11590ba48f"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\README.md",
+      "target": "vendor\\face_sdk\\README.md",
+      "sha256": "13a510232435e7f3ffc46811f9c6f68502c672e292ebab61d583bf84a039b934"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\models\\deploy.prototxt",
+      "target": "vendor\\face_sdk\\models\\deploy.prototxt",
+      "sha256": "dcd661dc48fc9de0a341db1f666a2164ea63a67265c7f779bc12d6b3f2fa67e9"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\models\\res10_300x300_ssd_iter_140000.caffemodel",
+      "target": "vendor\\face_sdk\\models\\res10_300x300_ssd_iter_140000.caffemodel",
+      "sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\models\\w600k_r50.onnx",
+      "target": "vendor\\face_sdk\\models\\w600k_r50.onnx",
+      "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43"
+    },
+    {
+      "source": "D:\\Python_Project\\ysj-project\\require\\face_sdk\\faces_db\\faces.db",
+      "target": "data/faces.db",
+      "sha256": "2b60941d13ce36b833fa02d7a3493bd7353a710babbcf4a6765ce052b8972222"
+    }
+  ],
+  "sdk_api": "init_sdk/register/is_registered/recognize/close",
+  "registry_rows_at_deployment": 1
+}

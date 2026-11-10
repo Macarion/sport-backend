@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+/outputs/
+/temp/
+/data/
+*.log
+/vendor/jump/*.pt
+/vendor/fonts/
+/vendor/face_sdk/
+.env

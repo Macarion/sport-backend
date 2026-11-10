@@ -23,7 +23,7 @@ DAPHNE_PORT = int(os.environ.get('DAPHNE_PORT', '8090'))
 PREWARM_ENABLED = False          # 开机预热子进程：默认关（模型打热文件缓存，有效性存疑）
 
 # ---------- 人脸门禁（第 7 步，ADR-0004） ----------
-FACE_GATE_ENABLED = True        # 总开关：True 时 spawn 人脸服务并在 situp 转 READY 前门禁（默认关）
+FACE_GATE_ENABLED = os.environ.get('FACE_GATE_ENABLED', '1').lower() not in ('0', 'false')  # 默认开启；离线联调可显式关闭
 FACE_GATE_TIMEOUT = 10           # 识别应答超时（秒）：超时按未通过处理并清在途，下一帧重试
 
 # ---------- 日志 ----------

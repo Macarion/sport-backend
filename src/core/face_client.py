@@ -34,6 +34,7 @@ class FaceClient:
         self._timeout = timeout
         self._student_id = None         # 最近一次 send 的学号（应答过滤键）
         self._timestamp = 0             # 最近一次 send 的毫秒时间戳（应答过滤键）
+        self._last_request_timestamp = 0  # survives reset: same-ms target/session changes cannot collide
         self._in_flight = False
         self._t0 = 0.0
         self._timed_out = False         # 超时已发生、待 poll 上报一次
@@ -65,7 +66,8 @@ class FaceClient:
         if self._request_q is None or self._in_flight:
             return False
         self._student_id = student_id
-        self._timestamp = int(time.time() * 1000)   # 毫秒时间戳，应答回带对齐用
+        self._timestamp = max(int(time.time() * 1000), self._last_request_timestamp + 1)
+        self._last_request_timestamp = self._timestamp
         self._request_q.put({'type': 'recognize', 'student_id': student_id,
                              'crop': crop, 'timestamp': self._timestamp,
                              'reply_to': self._send_end})

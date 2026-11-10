@@ -1,0 +1,198 @@
+{
+  "backend_base": "463f4c7fef31e35f0896e2ec3db8ada914e1cb94",
+  "frontend_base": "9f07e42f4ec19c12df71178406469c689f380c48",
+  "date": "2026-11-09",
+  "backend_tests": 34,
+  "frontend_transport_tests": 5,
+  "django_check": "passed",
+  "frontend_build": "passed",
+  "frontend_changed_file_lint": "passed",
+  "videos": {
+    "test5-final": {
+      "states": [
+        "CALIBRATING",
+        "WAITING_READY",
+        "ARMED",
+        "IN_JUMP",
+        "PROCESSING",
+        "RESULT"
+      ],
+      "received": 99,
+      "submitted": 99,
+      "dropped": 0,
+      "clean_exit": true,
+      "score_cm": 192.74745178222656,
+      "landing_frame_id": 63,
+      "session_id": "219d6a3fa76545c0971116d0eddd688c"
+    },
+    "test8-final": {
+      "states": [
+        "CALIBRATING",
+        "WAITING_READY",
+        "ARMED",
+        "IN_JUMP",
+        "PROCESSING",
+        "RESULT"
+      ],
+      "received": 58,
+      "submitted": 58,
+      "dropped": 0,
+      "clean_exit": true,
+      "score_cm": 178.1114501953125,
+      "landing_frame_id": 21,
+      "session_id": "7800c56c2b6b40f1ae26a9fa625ae345"
+    }
+  },
+  "limitations": [
+    "Face SDK/models/registry deployed and supplied sample verified; live registered-student verification still pending",
+    "Recorded camera WebRTC tested; physical camera / live athlete not tested",
+    "Single station only; concurrent GPU capacity not tested"
+  ],
+  "browser": {
+    "mode": "Chromium + recorded camera + real WebRTC/backend; face disabled",
+    "runs": [
+      {
+        "state": "RESULT",
+        "score_cm": 191.56390380859375,
+        "session_id": "aba0d96cf2bb4301851b74297f16155a",
+        "messages": 159,
+        "camera_released": true
+      },
+      {
+        "state": "RESULT",
+        "score_cm": 191.85684204101562,
+        "session_id": "171cb7981459495ebb11ddd0703748cb",
+        "messages": 154,
+        "camera_released": true
+      }
+    ],
+    "passed": true,
+    "page_errors": []
+  },
+  "parity": {
+    "checks": {
+      "mask_sha256": true,
+      "best_mask_index": true,
+      "instance_selection": true,
+      "score_cm": true,
+      "iou_predictions": true
+    },
+    "passed": true,
+    "score_cm": 192.9953155517578,
+    "backend_origin": "C:\\Users\\Rational\\.codex\\worktrees\\jump-multiprocess-backend\\backend\\src\\sports\\jump\\model_runtime.py",
+    "reference_origin": "D:\\Python_Project\\wcx_jump\\src\\wcx_jump\\segmentation.py",
+    "mask_sha256": "1a68b5cd43d1a5c452a965f5034af72779ef27008c9ed4d445ba94c5786e26bc"
+  },
+  "lifecycle": {
+    "jump": {
+      "sessions": 10,
+      "same_model": true,
+      "session_threads_joined": true,
+      "remaining_new_threads": [],
+      "drawing_changed_pixels": 10069
+    },
+    "situp": {
+      "sessions": 10,
+      "same_model": true,
+      "session_threads_joined": true,
+      "remaining_new_threads": [],
+      "drawing_changed_pixels": 50791
+    },
+    "pullup": {
+      "sessions": 10,
+      "same_model": true,
+      "session_threads_joined": true,
+      "remaining_new_threads": [],
+      "drawing_changed_pixels": 49046
+    }
+  },
+  "page": {
+    "passed": true,
+    "checks": [
+      "local preview",
+      "remote readiness",
+      "duplicate start",
+      "face checking/failed/unregistered/passed",
+      "face speech gate",
+      "score deduplication",
+      "null score",
+      "stop tracks",
+      "ignore late replies"
+    ]
+  },
+  "face_runtime": {
+    "onnxruntime": "1.31.1",
+    "providers": [
+      "AzureExecutionProvider",
+      "CPUExecutionProvider"
+    ],
+    "image": "D:\\Python_Project\\ysj-project\\require\\face_integration\\test\\test_dengchao.jpg",
+    "registry": "C:\\Users\\Rational\\.codex\\worktrees\\jump-multiprocess-backend\\backend\\data\\faces.db",
+    "supplied_sample": {
+      "matched": true,
+      "similarity": 1.0,
+      "face_detected": true
+    },
+    "temporary_registration": {
+      "passed": true,
+      "self_similarity": 1.0,
+      "blank_image_rejected": true
+    },
+    "service_ipc": [
+      {
+        "registered": false,
+        "ok": true,
+        "conf": 0.0
+      },
+      {
+        "registered": true,
+        "ok": false,
+        "conf": 0.0
+      },
+      {
+        "registered": true,
+        "ok": true,
+        "conf": 1.0
+      }
+    ],
+    "registry_rows": 1,
+    "passed": true,
+    "registry_unchanged": true
+  },
+  "browser_face_enabled": {
+    "mode": "Chromium + recorded camera + real WebRTC/backend; face enabled, unregistered fixture",
+    "runs": [
+      {
+        "state": "RESULT",
+        "score_cm": 197.8472442626953,
+        "session_id": "d0a6e205d8f1465dadea92ce3ef590bf",
+        "messages": 127,
+        "camera_released": true,
+        "face": {
+          "state": "passed",
+          "ok": true,
+          "conf": 0,
+          "registered": false,
+          "fail_count": 0
+        }
+      },
+      {
+        "state": "RESULT",
+        "score_cm": 198.7189178466797,
+        "session_id": "602b065471a44c168dc5e1240a327de8",
+        "messages": 128,
+        "camera_released": true,
+        "face": {
+          "state": "passed",
+          "ok": true,
+          "conf": 0,
+          "registered": false,
+          "fail_count": 0
+        }
+      }
+    ],
+    "passed": true,
+    "page_errors": []
+  },
+  "browser_fixture_note": "An initial 4K-source browser replay missed consecutive takeoff frames. The same clip preconverted to 1280x720 at 15 fps completed two face-enabled runs; no business thresholds changed."
+}

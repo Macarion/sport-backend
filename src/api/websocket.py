@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import numpy as np
 from aioice import Candidate
 from av import VideoFrame
@@ -60,7 +61,7 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, code):
-        user_manager.unregister_consumer(self.uid)
+        user_manager.unregister_consumer(self.uid, self)
 
         if hasattr(self, 'pc') and self.pc:
             await self.pc.close()
@@ -123,12 +124,18 @@ class WebRTCConsumer(AsyncWebsocketConsumer):
         while True:
             try:
                 frame = await track.recv()
+                timestamp_ms = int(time.time() * 1000)
             except MediaStreamError:
                 break
 
             frame_nd = frame.to_ndarray(format="bgr24")
 
-            await loop.run_in_executor(
-                None, lambda: user_manager.push_frame(self.uid, frame_nd)
-            )
+            try:
+                await loop.run_in_executor(None, user_manager.push_frame,
+                                           self.uid, frame_nd, timestamp_ms)
+            except Exception as exc:
+                log.exception("视频帧接收失败: uid=%s", self.uid)
+                await self.error({"message": str(exc)})
+                await loop.run_in_executor(None, user_manager.stop_sport_test, self.uid)
+                return
 

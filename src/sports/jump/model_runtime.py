@@ -4,10 +4,8 @@ import logging
 import os
 import sys
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
 
 from core.config import VENDOR_DIR
 
@@ -80,101 +78,99 @@ def resolve_jump_device() -> str:
     return "cuda" if _cuda_is_available("auto") else "cpu"
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parent
-API_ROOT = PACKAGE_ROOT.parent
-BACKEND_ROOT = API_ROOT.parent
-VENDOR_ROOT = VENDOR_DIR  # 资产区统一在 sport-backend/vendor（由 core/config 锚定）
-PROJECT_ROOT = BACKEND_ROOT
-WCX_DIR = VENDOR_ROOT / "wcx"
+# Detection and segmentation are independent, process-local YOLO models.
+YOLO_MODEL_PATH = VENDOR_DIR / "jump" / "yolo11n.pt"
+YOLO_SEG_MODEL_PATH = VENDOR_DIR / "jump" / "yolo11n-seg.pt"
+WCX_DIR = VENDOR_DIR / "wcx"
 ARUCOTEST_DIR = WCX_DIR / "arucotest"
-SAM2_PROJECT_ROOT = WCX_DIR / "sam2"
-YOLO_MODEL_PATH = WCX_DIR / "jump2test" / "yolo11n.pt"
-SAM2_CHECKPOINT_PATH = WCX_DIR / "sam2" / "checkpoints" / "sam2.1_hiera_small.pt"
-SAM2_CONFIG_PATH = WCX_DIR / "sam2" / "sam2" / "configs" / "sam2.1" / "sam2.1_hiera_s.yaml"
-
 _model_lock = threading.Lock()
 _model_bundle = None
-_algorithms: Optional[SimpleNamespace] = None
+_algorithms = None
 
 
-@dataclass(frozen=True)
-class RuntimePaths:
-    project_root: Path
-    wcx_dir: Path
-    arucotest_dir: Path
-
-
-def validate_vendor_assets() -> None:
-    required_assets = {
-        "实时算法入口 realtime_aruco.py": WCX_DIR / "realtime_aruco.py",
-        "fast ready 状态机 realtime_aruco_fast_ready.py": WCX_DIR / "realtime_aruco_fast_ready.py",
-        "ArUco 测距模块 aruco_measure.py": ARUCOTEST_DIR / "aruco_measure.py",
-        "ArUco pipeline 模块 pipeline_aruco.py": ARUCOTEST_DIR / "pipeline_aruco.py",
-        "YOLO 权重 yolo11n.pt": YOLO_MODEL_PATH,
-        "SAM2 checkpoint sam2.1_hiera_small.pt": SAM2_CHECKPOINT_PATH,
-        "SAM2 config sam2.1_hiera_s.yaml": SAM2_CONFIG_PATH,
-    }
-    missing = [f"{name}: {path}" for name, path in required_assets.items() if not path.exists()]
+def validate_vendor_assets():
+    required = [YOLO_MODEL_PATH, YOLO_SEG_MODEL_PATH, WCX_DIR / "realtime_aruco.py",
+                ARUCOTEST_DIR / "aruco_measure.py", ARUCOTEST_DIR / "pipeline_aruco.py",
+                ARUCOTEST_DIR / "full_pipeline_aruco.py"]
+    missing = [str(path) for path in required if not path.is_file()]
     if missing:
-        joined = "\n".join(missing)
-        raise FileNotFoundError(
-            "backend/vendor 资源不完整，无法启动 ArUco 跳远测距服务。缺失文件：\n"
-            f"{joined}"
-        )
+        raise FileNotFoundError("Jump resources missing: " + "; ".join(missing))
 
 
-def ensure_wcx_import_paths() -> RuntimePaths:
-    validate_vendor_assets()
-    for path in (WCX_DIR, ARUCOTEST_DIR, SAM2_PROJECT_ROOT):
-        path_str = str(path)
-        if path_str not in sys.path:
-            sys.path.insert(0, path_str)
-    return RuntimePaths(PROJECT_ROOT, WCX_DIR, ARUCOTEST_DIR)
-
-
-def get_algorithms() -> SimpleNamespace:
-    """Import heavy OpenCV/WCX modules only when a frame is actually processed."""
+def get_algorithms():
     global _algorithms
-    if _algorithms is not None:
-        return _algorithms
-
-    ensure_wcx_import_paths()
-    import realtime_aruco as realtime_core
-    from aruco_measure import build_aruco_plane, detect_aruco_markers, measure_jump_from_files
-    from pipeline_aruco import write_result_file
-
-    _algorithms = SimpleNamespace(
-        realtime_core=realtime_core,
-        build_aruco_plane=build_aruco_plane,
-        detect_aruco_markers=detect_aruco_markers,
-        measure_jump_from_files=measure_jump_from_files,
-        write_result_file=write_result_file,
-    )
+    if _algorithms is None:
+        for path in (WCX_DIR, ARUCOTEST_DIR):
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+        import realtime_aruco as realtime_core
+        from aruco_measure import build_aruco_plane, detect_aruco_markers, measure_jump_from_files
+        from pipeline_aruco import write_result_file
+        _algorithms = SimpleNamespace(realtime_core=realtime_core,
+            build_aruco_plane=build_aruco_plane, detect_aruco_markers=detect_aruco_markers,
+            measure_jump_from_files=measure_jump_from_files, write_result_file=write_result_file)
     return _algorithms
 
 
+def create_yolo_segmenter(checkpoint, device, options=None):
+    """YOLO branch migrated from wcx_jump.segmentation (source hash in docs)."""
+    import hashlib
+    checkpoint = Path(checkpoint)
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"YOLO segmentation weights missing: {checkpoint}")
+    import torch
+    import ultralytics
+    from ultralytics import YOLO
+    from .yolo_segmentation import YoloImageSegmenter, YoloSegOptions
+    requested = torch.device(device)
+    if requested.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA unavailable; explicitly select cpu")
+    options = options or YoloSegOptions()
+    if options.half and requested.type != "cuda":
+        raise ValueError("FP16 requires CUDA")
+    model = YOLO(str(checkpoint))
+    if model.task != "segment" or model.names.get(0) != "person":
+        raise ValueError("Expected segmentation weights with COCO person class 0")
+    model.to(requested)
+    with checkpoint.open("rb") as file:
+        digest = hashlib.file_digest(file, "sha256").hexdigest()
+    info = {"backend": "yolo11n-seg", "checkpoint": str(checkpoint),
+            "checkpoint_sha256": digest, "device": str(requested),
+            "precision": "FP16" if options.half else "FP32",
+            "source_origin": ultralytics.__file__, "framework_version": ultralytics.__version__,
+            "parameter_count": sum(p.numel() for p in model.model.parameters()),
+            "weight_bytes": checkpoint.stat().st_size, "task": model.task}
+    return YoloImageSegmenter(model, torch, info, options)
+
+
 def get_model_bundle():
-    """Load YOLO + SAM2 once and share them across web sessions."""
     global _model_bundle
-    if _model_bundle is not None:
-        return _model_bundle
-
     with _model_lock:
-        if _model_bundle is not None:
-            return _model_bundle
+        if _model_bundle is None:
+            validate_vendor_assets()
+            import torch
+            from ultralytics import YOLO
+            device = resolve_jump_device()
+            detector = YOLO(str(YOLO_MODEL_PATH))
+            if detector.task != "detect" or detector.names.get(0) != "person":
+                raise ValueError("Expected detection weights with COCO person class 0")
+            detector.to(device)
+            segmenter = create_yolo_segmenter(YOLO_SEG_MODEL_PATH, device)
+            # Finish lazy predictor/CUDA initialization before sending loaded(True),
+            # so the first athlete frames do not pay the one-time startup cost.
+            import numpy as np
+            warmup_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+            detector.predict(warmup_frame, verbose=False, device=device)
+            segmenter.predictor.predict(warmup_frame, imgsz=640, conf=0.25, iou=0.7,
+                                        max_det=300, classes=[0], device=device,
+                                        half=False, retina_masks=True, verbose=False)
+            segmenter.synchronize()
+            _model_bundle = SimpleNamespace(yolo_model=detector, segmenter=segmenter,
+                                            keypoint_infer=None, torch_module=torch)
+    return _model_bundle
 
-        ensure_wcx_import_paths()
-        from realtime_aruco_fast_ready import load_models_without_keypoint
 
-        yolo_path = YOLO_MODEL_PATH
-        sam2_checkpoint = SAM2_CHECKPOINT_PATH
-        sam2_config = "configs/sam2.1/sam2.1_hiera_s.yaml"
-        device = resolve_jump_device()
-
-        _model_bundle = load_models_without_keypoint(
-            yolo_model_path=yolo_path,
-            sam2_checkpoint=sam2_checkpoint,
-            sam2_config=sam2_config,
-            device=device,
-        )
-        return _model_bundle
+def release_model_bundle():
+    global _model_bundle
+    with _model_lock:
+        _model_bundle = None
