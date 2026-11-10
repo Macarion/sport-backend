@@ -1116,13 +1116,10 @@ class SportPullup(BaseSport):
         """换会话复位：重建评测状态机，推理模型保留（进程复用，ADR-0003）。"""
         self._evaluator = Evaluator()
 
-    def process(self, frame, config, frame_id, uid=0):
+    def process(self, task):
         """处理一帧（就地绘制），返回评测数据 dict；本帧无有效数据返回 None。"""
         if self._inferencer is None:
             raise RuntimeError('SportPullup 未调用 load()')
-        task = SportTask(uid=uid, frame_id=frame_id, sport_type='pullup',
-                         config=config if config is not None else {})
-        task.set_frame(frame)
         task.set_data(self._inferencer.process(task))
         return self._evaluator.process(task)
 
