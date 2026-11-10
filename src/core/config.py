@@ -24,7 +24,8 @@ PREWARM_ENABLED = False          # 开机预热子进程：默认关（模型打
 
 # ---------- 人脸门禁（第 7 步，ADR-0004） ----------
 FACE_GATE_ENABLED = True        # 总开关：True 时 spawn 人脸服务并在 situp 转 READY 前门禁（默认关）
-FACE_GATE_TIMEOUT = 10           # 识别应答超时（秒）：超时按未通过处理并清在途，下一帧重试
+FACE_GATE_TIMEOUT = 3           # 识别应答超时（秒）：超时按未通过处理并清在途，下一帧重试
+FACE_MIN_SEND_INTERVAL = 0.5     # 客户端硬限流：同一 client 两次 send 的最小间隔（秒），应答再快也不放宽
 
 # ---------- 日志 ----------
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')

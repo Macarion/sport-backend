@@ -8,6 +8,8 @@ status() 随 Evaluator 返回值（data.face）承载给前端。
 
 单任务限流：send 时已有在途请求（未超时）→ 返回 False（本帧丢弃识别资格，
 不缓存不排队），应答到达或超时后由下一帧重新触发。
+硬限流：同一 client 两次 send 间隔小于 FACE_MIN_SEND_INTERVAL（默认 0.5s，
+core/config.py 可配）→ 同样 False——应答再快也不放宽，按 client 计、跨会话保留。
 
 通路：请求经共享 request_q 捎带实例专用结果管道的写端；应答由 poll() 在调用方
 线程 poll(0) 非阻塞直读——无转发线程、不经 worker 的 in_q。ADR-0004 三不变量
@@ -20,7 +22,7 @@ import time
 
 import multiprocessing as mp
 
-from core.config import FACE_GATE_TIMEOUT
+from core.config import FACE_GATE_TIMEOUT, FACE_MIN_SEND_INTERVAL
 from core.log import get_logger
 
 log = get_logger('FaceClient')
@@ -41,6 +43,7 @@ class FaceClient:
         self._gate_opened = False       # 门禁已开（status 开始出值）
         self._last = None               # 最近一次核验结论（status 快照）
         self._fail_count = 0            # 会话内失败/超时累计（前端第3次起才提示）
+        self._last_send_ts = 0.0        # 硬限流：上次 send 时刻（跨会话保留，首帧无延迟）
         if request_q is not None:
             # 每实例一条持久管道：写端随每请求 pickle 捎带，读端长期持有防 EOF
             self._recv_end, self._send_end = mp.Pipe(duplex=False)
@@ -48,7 +51,7 @@ class FaceClient:
             self._recv_end = self._send_end = None
 
     def reset(self):
-        """会话开始清全部状态并排空管道（worker 每会话调用）。"""
+        """会话开始清会话状态并排空管道（worker 每会话调用）；硬限流 _last_send_ts 不清。"""
         self._student_id, self._timestamp = None, 0
         self._in_flight, self._t0, self._timed_out = False, 0.0, False
         self._face_ok, self._gate_opened, self._last = False, False, None
@@ -61,15 +64,19 @@ class FaceClient:
                     break
 
     def send(self, student_id, crop) -> bool:
-        """投递识别请求；门禁关闭或在途未超时 → False（本帧丢弃，不排队）。"""
+        """投递识别请求；门禁关闭、在途未超时或距上次 send 不足最小间隔 → False。"""
         if self._request_q is None or self._in_flight:
             return False
+        now = time.time()
+        if now - self._last_send_ts < FACE_MIN_SEND_INTERVAL:
+            return False                # 硬限流：不足最小发送间隔
+        self._last_send_ts = now
         self._student_id = student_id
-        self._timestamp = int(time.time() * 1000)   # 毫秒时间戳，应答回带对齐用
+        self._timestamp = int(now * 1000)   # 毫秒时间戳，应答回带对齐用
         self._request_q.put({'type': 'recognize', 'student_id': student_id,
                              'crop': crop, 'timestamp': self._timestamp,
                              'reply_to': self._send_end})
-        self._in_flight, self._t0 = True, time.time()
+        self._in_flight, self._t0 = True, now
         self._timed_out = False
         return True
 
