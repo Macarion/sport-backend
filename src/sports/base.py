@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from core.task import SportTask
 
 
 class BaseSport(ABC):
@@ -20,7 +21,7 @@ class BaseSport(ABC):
         """换会话复位评测状态（保留已加载模型，供下一个用户复用）。"""
 
     @abstractmethod
-    def process(self, frame, config, frame_id, uid=0):
+    def process(self, task: SportTask):
         """处理一帧（在共享内存帧上就地绘制），返回评测数据 dict；本帧无有效数据时返回 None。"""
 
     @abstractmethod
