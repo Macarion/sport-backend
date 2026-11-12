@@ -13,7 +13,15 @@ import numpy as np
 from enum import IntEnum
 from PIL import Image, ImageDraw, ImageFont
 
-from core.config import FONT_DIR
+from core.config import (
+    FONT_DIR,
+    SITUP_HIP_DIR_DEADBAND,
+    SITUP_HIP_DRIFT_ALPHA,
+    SITUP_HIP_DRIFT_DRAW,
+    SITUP_HIP_DRIFT_EMA_MAX,
+    SITUP_HIP_DRIFT_THRESHOLD,
+    SITUP_HIP_DRIFT_WINDOW,
+)
 from core.task import SportTask
 
 from .situp_infer import PosePoint
@@ -52,13 +60,13 @@ def compensate_angle(body_ground: float, ground_slope: float) -> float:
         t > 30      → 60
     """
     t = body_ground - abs(math.degrees(math.atan(ground_slope)))
-    if t <= 15:
-        v = t + WUCHA
-    elif t <= 30:
-        v = t + WUCHA + 10
-    else:
-        v = 60
-    return min(v, 90)
+    # if t <= 15:
+    #     v = t + WUCHA
+    # elif t <= 30:
+    #     v = t + WUCHA + 10
+    # else:
+    #     v = 60
+    return min(t, 90)
 
 
 # 评测状态
@@ -95,11 +103,14 @@ class Evaluator:
         self.is_out_of_bounds = False  # 人员替换/替考作弊标记
         self.is_flat_insufficient = False  # 肩背未着地作弊标记
         self.is_rise_insufficient = False  # 上起角度不足作弊标记
-        self.is_knee_moved = False  # 膝盖移动作弊标记
+        self.is_knee_moved = False  # 大幅移动作弊标记（胯部持续偏移触发；键名沿用前端契约）
         self.is_assist_cheat = False  # 头后方有人助力作弊标记
-        self.knee_move_alpha = 0.05  # 膝盖移动权重，权重越大，平均值越接近当前帧
-        self.knee_move_threshold = 0.15  # 膝盖移动阈值(1代表视频宽度)
-        self.weighted_knee_point = None  # 膝盖移动加权平均点
+        # 胯部换人过滤：READY 阶段记录参照（与地面基准线同帧确定，转 FLAT 帧为准）；
+        # 测试期分轴漂移或膝胯方向反转的帧整帧忽略，连续无效超过窗口（墙钟秒）判大幅移动，
+        # 有效帧且分轴位移≤EMA_MAX 时以 EMA 慢跟随参照
+        self.hip_ref = None  # 参照胯部中点 (x, y)
+        self.hip_dir = None  # 膝相对胯的左右方向：+1 膝在右 / -1 膝在左（死区外记录）
+        self.hip_invalid_since = None  # 连续无效段的起始墙钟时刻（有效帧清零）
         self.assist_count = 0  # 头后方有人驻留的连续帧计数
         self.assist_hold_frames = 75  # 驻留多少帧判定助力作弊
         self.assist_behind_dx = 0.25  # 头后方横轴检测范围(相对画面宽,沿脚→头方向)
@@ -194,55 +205,65 @@ class Evaluator:
             return None
         return frame[y1:y2, x1:x2].copy()
 
-    def _fit_ground_line(self, img, points, drawing):
-        """预设/拟合地面参考线：FLAT 前每帧更新 ground_slope/offset，FLAT 后冻结只读。
+    def _fit_ground_line(self, points):
+        """拟合地面基准线（仅 READY 阶段调用）：缓存肩踝坐标并更新 slope/offset。
 
-        肩、脚踝坐标缓存只在 READY 阶段更新（等待/人脸阶段冻结），与原实现逐帧行为一致；
-        拟合后的红色基准线在 READY 起绘制（含测试期，用冻结值）。
+        转 FLAT 那一帧的最后一次拟合即测试期全程冻结值，与胯部参照/方向记录同帧；
+        绿色预设线与红色基准线的绘制统一在 process 绘制段（_draw_ground_lines）。
         """
         h, w = self.h, self.w
+        # 预设参考地面直线斜率（原 k1；仅缓存条件使用）
+        preset_slope = (h - h // 2) / (0 - w)
 
+        # 参考线与当前肩脚连线夹角差≥5°时缓存肩、脚踝坐标（沿用原语义——此处用
+        # 拟合前的 0 与预设斜率比较，原代码 k0 在该点恒为 0）
+        if abs(math.degrees(math.atan(0)) - math.degrees(math.atan(preset_slope))) >= 5:
+            self.shoulder_x = int(points[5].x)
+            self.shoulder_y = int(points[5].y)
+            self.heal_x = int(points[15].x)
+            self.heal_y = int(points[15].y)
+
+        # 用肩、脚踝缓存拟合地面基线斜率与截距，避免除零
+        self.ground_slope = (
+            (self.shoulder_y - self.heal_y) / (self.shoulder_x - self.heal_x)
+            if self.shoulder_x - self.heal_x != 0
+            else 0
+        )
+        self.ground_offset = self.shoulder_y - self.ground_slope * self.shoulder_x
+
+    def _record_hip_reference(self, points):
+        """READY 阶段记录胯部参照与膝相对胯的左右方向（与地面基准线同帧确定）。
+
+        每帧覆盖、转 FLAT 帧为准；膝胯水平距离小于死区（姿态接近竖直，如坐/站）
+        时方向不可判，不覆盖方向记录——胯部中点照记。
+        """
+        hip_x = (points[11].x + points[12].x) / 2.0
+        hip_y = (points[11].y + points[12].y) / 2.0
+        self.hip_ref = (hip_x, hip_y)
+
+        knee_dx = (points[13].x + points[14].x) / 2.0 - hip_x
+        if abs(knee_dx) >= self.w * SITUP_HIP_DIR_DEADBAND:
+            self.hip_dir = 1 if knee_dx > 0 else -1
+
+    def _draw_ground_lines(self, img, drawing):
+        """绘制地面参考线（process 绘制段调用）：绿色预设线（FLAT 前）+
+        红色拟合基准线（READY 起，测试期用冻结值）。"""
+        if not drawing:
+            return
+        h, w = self.h, self.w
         # 预设参考地面线两点坐标（左上、右下）
         x01, y001 = 0, h
         x02, y002 = w, h // 2
-        # 预设参考地面直线斜率（原 k1，仅本函数使用）
-        preset_slope = (y001 - y002) / (x01 - x02)
-        x3 = w // 2  # 参考线中点X
-
-        # 左肩(5)、左脚踝(15)像素坐标，用于拟合地面基准线
-        x1 = int(points[5].x)
-        y1 = int(points[5].y)
-        x2 = int(points[15].x)
-        y2 = int(points[15].y)
-
         if self.state < State.FLAT:
             # 未正式测试时，绘制绿色预设参考地面线+中点标记
-            if drawing:
-                cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
-                cv2.circle(img, (x3, int(x3 * preset_slope + y001)), 5, (255, 0, 0), -1)
-
-            # 参考线与当前肩脚连线夹角差≥5°且未进入测试，缓存肩、脚踝坐标用于拟合地面线
-            # （等待坐下/人脸阶段冻结：缓存只在等躺下阶段更新；判断沿用原语义——此处用
-            # 拟合前的 0 与预设斜率比较，原代码 k0 在该点恒为 0）
-            if self.state == State.READY and abs(math.degrees(math.atan(0)) - math.degrees(math.atan(preset_slope))) >= 5:
-                self.shoulder_x = x1
-                self.shoulder_y = y1
-                self.heal_x = x2
-                self.heal_y = y2
-
-            # 用肩、脚踝缓存拟合地面基线斜率与截距，避免除零
-            self.ground_slope = (
-                (self.shoulder_y - self.heal_y) / (self.shoulder_x - self.heal_x)
-                if self.shoulder_x - self.heal_x != 0
-                else 0
-            )
-            self.ground_offset = self.shoulder_y - self.ground_slope * self.shoulder_x
-
-        # 拟合基线在 x01/x02 两点对应的 Y 值（FLAT 后用冻结值）
-        y01 = int(self.ground_slope * x01 + self.ground_offset)
-        y02 = int(self.ground_slope * x02 + self.ground_offset)
-        if drawing and self.state >= State.READY:
-            # 绘制红色拟合地面基准线（等躺下之前拟合值未更新，不画）
+            preset_slope = (y001 - y002) / (x01 - x02)
+            x3 = w // 2  # 参考线中点X
+            cv2.line(img, (x01, y001), (x02, y002), (0, 255, 0), 3)
+            cv2.circle(img, (x3, int(x3 * preset_slope + y001)), 5, (255, 0, 0), -1)
+        if self.state >= State.READY:
+            # 红色拟合地面基准线（等躺下之前拟合值未更新，不画）
+            y01 = int(self.ground_slope * x01 + self.ground_offset)
+            y02 = int(self.ground_slope * x02 + self.ground_offset)
             cv2.line(img, (x01, y01), (x02, y02), (0, 0, 255), 3)
 
     def _run_prep_phase(self, task, points):
@@ -279,8 +300,8 @@ class Evaluator:
                 self.state = State.READY
 
         # ========== 等躺下阶段：躺下合格进入测试（FLAT） ==========
-        # 躯干与地面基准夹角差<=10，肩、头、脚关键点在拟合地面线下方（容差 0.05h）
         if self.state == State.READY:
+            # 躯干与地面基准夹角差<=10，肩、头、脚关键点在拟合地面线下方（容差 0.05h）
             body_ground = angle_deg(xy(points[5]), xy(points[11]), (w, points[11].y))
             base_angle = angle_deg(xy(points[11]), xy(points[15]), (w, points[15].y))
             if (
@@ -290,17 +311,72 @@ class Evaluator:
                 and points[11].y <= self.ground_slope * points[11].x + self.ground_offset + h * 0.05
                 and points[5].y <= self.ground_slope * points[5].x + self.ground_offset + h * 0.05
             ):
+                # 地面基准线拟合与胯部参照/方向记录同帧确定（转 FLAT 帧即最终依据，
+                # 前端可据红色基准线复核方向判定）
+                self._fit_ground_line(points)
+                self._record_hip_reference(points)
+
                 self.ready_count += 1
                 # 10帧预备姿态，正式开启测试
                 if self.ready_count >= 10:
                     self.state = State.FLAT
                     self.ready_time = time.time()
 
-    def _run_test_phase(self, points, person_boxes, selected_idx, start_count, body_angle2):
-        """正式测试主逻辑（FLAT..FINISHED）：补偿躯干角 → 作弊检测 → 转移与计数。
+    def _hip_gate_valid(self, points) -> bool:
+        """测试期换人/助手过滤：位置漂移或膝胯方向反转的帧判本帧非被测者。
 
-        返回 (is_new_rise, body_angle2)，body_angle2 为补偿后的值供返回值 angle 使用。
+        - 分轴位移 > 判定阈值，或膝胯左右方向与 READY 期记录相反（死区外才判）→ 无效；
+        - 连续无效（墙钟）超窗 → 置 is_knee_moved 并放行本帧（_run_test_phase 既有
+          分支当帧置 FINISHED，fatal 随 dict 送达前端，无挂死路径）；瞬时无效 → False，
+          process 整帧冻结（状态/计数/hints 全停）；
+        - 有效帧清零连续无效计时，且仅当分轴位移 ≤ EMA_MAX 时按原膝盖加权公式
+          EMA 慢跟随参照（无效帧与 0.05~0.15 区间均不更新，防参照被异常位移拖走）。
         """
+        if self.hip_ref is None:
+            return True
+        hip_x = (points[11].x + points[12].x) / 2.0
+        hip_y = (points[11].y + points[12].y) / 2.0
+        dx = abs(hip_x - self.hip_ref[0])
+        dy = abs(hip_y - self.hip_ref[1])
+        drifted = dx > self.w * SITUP_HIP_DRIFT_THRESHOLD or dy > self.w * SITUP_HIP_DRIFT_THRESHOLD
+
+        # 左右方向反转 = 判助手（膝胯水平距离小于死区则方向不可判，不参与判定）
+        reversed_dir = False
+        if self.hip_dir is not None:
+            knee_dx = (points[13].x + points[14].x) / 2.0 - hip_x
+            if abs(knee_dx) >= self.w * SITUP_HIP_DIR_DEADBAND:
+                reversed_dir = (1 if knee_dx > 0 else -1) != self.hip_dir
+
+        if drifted or reversed_dir:
+            now = time.time()
+            if self.hip_invalid_since is None:
+                self.hip_invalid_since = now
+            if now - self.hip_invalid_since > SITUP_HIP_DRIFT_WINDOW:
+                self.is_knee_moved = True  # 触发：本帧放行，当帧置 FINISHED
+                self.hip_invalid_since = None
+                return True
+            return False  # 瞬时无效（含首个无效帧）：整帧冻结
+
+        # 有效帧：清零连续无效计时，小位移内 EMA 慢跟随
+        self.hip_invalid_since = None
+        if dx <= self.w * SITUP_HIP_DRIFT_EMA_MAX and dy <= self.w * SITUP_HIP_DRIFT_EMA_MAX:
+            a = SITUP_HIP_DRIFT_ALPHA
+            self.hip_ref = (
+                self.hip_ref[0] * (1 - a) + hip_x * a,
+                self.hip_ref[1] * (1 - a) + hip_y * a,
+            )
+        return True
+
+    def _run_test_phase(self, points, person_boxes, selected_idx, start_count, body_angle2):
+        """正式测试主逻辑（FLAT..FINISHED）：换人过滤 → 补偿躯干角 → 作弊检测 → 转移与计数。
+
+        入口先过 _hip_gate_valid：换人/助手帧返回 None（process 整帧冻结）；
+        正常返回 (is_new_rise, body_angle2)，body_angle2 为补偿后的值供返回值 angle 使用。
+        """
+        # 测试期换人/助手过滤：无效帧不参与任何评测
+        if not self._hip_gate_valid(points):
+            return None
+
         # ========== 分段补偿躯干角（等价表见 compensate_angle） ==========
         body_angle2 = compensate_angle(body_angle2, self.ground_slope)
 
@@ -312,7 +388,6 @@ class Evaluator:
         self.last_rise_angle = max(body_angle2, self.last_rise_angle)
         self._cheat_flat_insufficient(body_angle2)
         self._cheat_rise_insufficient(body_angle2)
-        self._cheat_knee_move(points)
         self._cheat_assist(points, person_boxes, selected_idx)
 
         is_new_rise = False
@@ -383,22 +458,8 @@ class Evaluator:
         if self.is_flat(body_angle2) and self.is_mid(self.last_rise_angle):
             self.is_rise_insufficient = True
 
-    def _cheat_knee_move(self, points):
-        """作弊5：腿部移动/其他人抢走关键点（膝盖点加权漂移超阈值即判）。"""
-        if self.weighted_knee_point is None:
-            self.weighted_knee_point = points[13]
-
-        if (
-            self.weighted_knee_point.x - points[13].x > self.w * self.knee_move_threshold
-            or self.weighted_knee_point.y - points[13].y > self.w * self.knee_move_threshold
-        ):
-            self.is_knee_moved = True
-
-        self.weighted_knee_point.x = self.weighted_knee_point.x * (1 - self.knee_move_alpha) + points[13].x * self.knee_move_alpha
-        self.weighted_knee_point.y = self.weighted_knee_point.y * (1 - self.knee_move_alpha) + points[13].y * self.knee_move_alpha
-
     def _cheat_assist(self, points, person_boxes, selected_idx):
-        """作弊6：头部后方有人长时间驻留，判定推背助力。"""
+        """作弊5：头部后方有人长时间驻留，判定推背助力。"""
         if self._has_assist_behind_head(points, person_boxes, selected_idx):
             self.assist_count += 1
         else:
@@ -507,21 +568,34 @@ class Evaluator:
         # 每帧更新画面尺寸
         self.h, self.w = img.shape[:2]
 
-        # 地面参考线：FLAT 前每帧拟合更新，之后冻结只读
-        self._fit_ground_line(img, points, drawing)
-
-        # 阶段一状态推进（等待/人脸/等躺下）
+        # 阶段一状态推进（等待/人脸/等躺下；READY 内确定地面基准线与胯部参照/方向）
         self._run_prep_phase(task, points)
+
+        # ---------- 绘制段（process 集中，早于换人过滤——被忽略帧照常绘制） ----------
+        # 胯部有效区域矩形：参照 ± 分轴阈值（与过滤判定同源），纯可视化
+        if SITUP_HIP_DRIFT_DRAW and drawing and self.hip_ref is not None:
+            half = self.w * SITUP_HIP_DRIFT_THRESHOLD
+            cx, cy = self.hip_ref
+            cv2.rectangle(
+                img,
+                (int(cx - half), int(cy - half)),
+                (int(cx + half), int(cy + half)),
+                (0, 0, 255), 1,
+            )
+        self._draw_ground_lines(img, drawing)
 
         # 躯干与地面夹角（raw；测试期内由 _run_test_phase 补偿后返回）
         body_angle2 = angle_deg(xy(points[5]), xy(points[11]), (self.w, points[11].y))
 
-        # 正式测试阶段（FLAT..FINISHED）
+        # 正式测试阶段（FLAT..FINISHED）：换人过滤在 _run_test_phase 入口
         is_new_rise = False
-        if self.state >= State.FLAT and self.state < State.FINISHED:
-            is_new_rise, body_angle2 = self._run_test_phase(
+        if State.FLAT <= self.state < State.FINISHED:
+            phase = self._run_test_phase(
                 points, person_boxes, selected_idx, start_count, body_angle2,
             )
+            if phase is None:
+                return None  # 换人/助手帧：状态/计数/hints 冻结（绘制已完成）
+            is_new_rise, body_angle2 = phase
 
         # 提示：表驱动生成 hints 并（drawing 时）一次绘制
         hints, img = self._emit_hints(img, drawing)
