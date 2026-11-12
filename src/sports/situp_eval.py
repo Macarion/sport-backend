@@ -58,7 +58,7 @@ def compensate_angle(body_ground: float, ground_slope: float) -> float:
         v = t + WUCHA + 10
     else:
         v = 60
-    return min(v, 60)
+    return min(v, 90)
 
 
 # 评测状态
@@ -417,20 +417,6 @@ class Evaluator:
             fontStyle = ImageFont.load_default()
 
         for text, left, top, textColor in rows:
-            # 绘制边框（黑底描边）
-            # for x in range(-2, 3):
-            #     for y in range(-2, 3):
-            #         if x != 0 or y != 0:
-            #             draw.text((left + x, top + y), text, (0, 0, 0), font=fontStyle)
-
-            # 绘制加粗的文本（通过多次绘制模拟加粗效果）
-            # for i in range(1, 3):
-            #     draw.text((left + i, top), text, textColor, font=fontStyle)
-            #     draw.text((left - i, top), text, textColor, font=fontStyle)
-            #     draw.text((left, top + i), text, textColor, font=fontStyle)
-            #     draw.text((left, top - i), text, textColor, font=fontStyle)
-
-            # 再绘制一次文本以覆盖边框的部分
             draw.text((left, top), text, textColor, font=fontStyle)
 
         np.copyto(img, cv2.cvtColor(np.asarray(pil_img), cv2.COLOR_RGB2BGR))
