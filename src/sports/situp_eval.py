@@ -412,25 +412,23 @@ class Evaluator:
         pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(pil_img)
         try:
-            fontStyle = ImageFont.truetype(
-                str(FONT_DIR / "msyh.ttf"), 40, encoding="utf-8", index=1
-            )
+            fontStyle = ImageFont.truetype(str(FONT_DIR / "msyhbd.ttf"), 30)
         except:
             fontStyle = ImageFont.load_default()
 
         for text, left, top, textColor in rows:
             # 绘制边框（黑底描边）
-            for x in range(-2, 3):
-                for y in range(-2, 3):
-                    if x != 0 or y != 0:
-                        draw.text((left + x, top + y), text, (0, 0, 0), font=fontStyle)
+            # for x in range(-2, 3):
+            #     for y in range(-2, 3):
+            #         if x != 0 or y != 0:
+            #             draw.text((left + x, top + y), text, (0, 0, 0), font=fontStyle)
 
             # 绘制加粗的文本（通过多次绘制模拟加粗效果）
-            for i in range(1, 3):
-                draw.text((left + i, top), text, textColor, font=fontStyle)
-                draw.text((left - i, top), text, textColor, font=fontStyle)
-                draw.text((left, top + i), text, textColor, font=fontStyle)
-                draw.text((left, top - i), text, textColor, font=fontStyle)
+            # for i in range(1, 3):
+            #     draw.text((left + i, top), text, textColor, font=fontStyle)
+            #     draw.text((left - i, top), text, textColor, font=fontStyle)
+            #     draw.text((left, top + i), text, textColor, font=fontStyle)
+            #     draw.text((left, top - i), text, textColor, font=fontStyle)
 
             # 再绘制一次文本以覆盖边框的部分
             draw.text((left, top), text, textColor, font=fontStyle)

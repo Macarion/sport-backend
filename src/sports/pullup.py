@@ -917,7 +917,7 @@ def cv2ImgAddText(img, text, left, top, textColor=(0, 255, 0), textSize=10, bord
 
     draw = ImageDraw.Draw(img)  # 创建一个可以在给定图像上绘图的对象
     try:
-        fontStyle = ImageFont.truetype(str(FONT_DIR / "msyh.ttf"), textSize, encoding="utf-8", index=1)
+        fontStyle = ImageFont.truetype(str(FONT_DIR / "msyhbd.ttf"), textSize)
     except:
         fontStyle = ImageFont.load_default()
 
@@ -941,17 +941,17 @@ def cv2ImgAddText(img, text, left, top, textColor=(0, 255, 0), textSize=10, bord
 
 
     # 绘制边框
-    for x in range(-borderWidth, borderWidth + 1):
-        for y in range(-borderWidth, borderWidth + 1):
-            if x != 0 or y != 0:
-                draw.text((left + x, top + y), text, borderColor, font=fontStyle)
+    # for x in range(-borderWidth, borderWidth + 1):
+    #     for y in range(-borderWidth, borderWidth + 1):
+    #         if x != 0 or y != 0:
+    #             draw.text((left + x, top + y), text, borderColor, font=fontStyle)
 
-    # 绘制加粗的文本（通过多次绘制模拟加粗效果）
-    for i in range(1, 3):
-        draw.text((left + i, top), text, textColor, font=fontStyle)
-        draw.text((left - i, top), text, textColor, font=fontStyle)
-        draw.text((left, top + i), text, textColor, font=fontStyle)
-        draw.text((left, top - i), text, textColor, font=fontStyle)
+    # # 绘制加粗的文本（通过多次绘制模拟加粗效果）
+    # for i in range(1, 3):
+    #     draw.text((left + i, top), text, textColor, font=fontStyle)
+    #     draw.text((left - i, top), text, textColor, font=fontStyle)
+    #     draw.text((left, top + i), text, textColor, font=fontStyle)
+    #     draw.text((left, top - i), text, textColor, font=fontStyle)
 
     # 再绘制一次文本以覆盖边框的部分
     draw.text((left, top), text, textColor, font=fontStyle)
