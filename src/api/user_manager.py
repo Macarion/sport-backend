@@ -12,7 +12,7 @@ import time
 import multiprocessing as mp
 
 from core.config import FACE_GATE_ENABLED, IDLE_TIMEOUT
-from core.face_service import get_request_q
+from face.face_service import get_request_q
 from core.log import get_logger
 from core.registry import is_registered
 from core.shm import SlotSet, attach_slot

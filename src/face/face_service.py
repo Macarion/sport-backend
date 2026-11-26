@@ -1,4 +1,4 @@
-# core/face_service.py
+# face/face_service.py
 """人脸服务进程（ADR-0004/0005）：web 启动即异步预载模型，单任务识别，结果直回请求方。
 
 请求：worker 的 face_client 经共享请求队列投递

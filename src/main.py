@@ -61,7 +61,7 @@ def main():
         log.info('预热已关闭（config.PREWARM_ENABLED=False），模型由首个会话懒加载')
 
     if FACE_GATE_ENABLED:
-        from core.face_service import spawn_face_service
+        from face.face_service import spawn_face_service
         spawn_face_service()   # 异步预载，不阻塞 daphne 启动
 
     from daphne.cli import CommandLineInterface

@@ -22,7 +22,7 @@ import time
 import multiprocessing as mp
 
 from core.config import IDLE_TIMEOUT
-from core.face_client import FaceClient
+from face.face_client import FaceClient
 from core.log import get_logger
 from core.registry import load_sport
 from core.task import SportTask

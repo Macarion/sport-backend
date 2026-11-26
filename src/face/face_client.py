@@ -1,4 +1,4 @@
-# core/face_client.py
+# face/face_client.py
 """人脸识别客户端类（ADR-0005）。
 
 worker 启动时实例化（门禁关闭即 face_request_q 为 None 时为 None），经

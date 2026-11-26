@@ -19,7 +19,8 @@ start.bat        :: 等价于 python src/main.py
 | 路径 | 职责 |
 |---|---|
 | `src/main.py` | 唯一入口：轻顶层 + guard 内程序化托管 daphne、清理收口、开机预热与人脸服务 spawn（ADR-0002/0004） |
-| `src/core/` | 契约层：`task.py` 任务消息（唯一定义）、`shm.py` per-user 共享内存槽、`registry.py` 字符串懒注册表、`log.py`、`face_service.py`/`face_client.py` 人脸门禁 IPC（ADR-0004） |
+| `src/core/` | 契约层：`task.py` 任务消息（唯一定义）、`shm.py` per-user 共享内存槽、`registry.py` 字符串懒注册表、`log.py`、`config.py` 统一配置 |
+| `src/face/` | 人脸门禁：`face_service.py` 服务进程（spawn 目标）、`face_client.py` worker 客户端、`face_register.py` 注册工具（ADR-0004/0005） |
 | `src/sports/` | 体测项目封装：`base.py`（BaseSport）、`situp.py`（SportSitup）、`pullup.py`（SportPullup） |
 | `src/worker/` | `run_user_worker` 用户进程主循环（phase/result/finished/error 单一出口） |
 | `src/api/` | Django 应用：`views`/`websocket`/`user_manager`（IPC 客户端）等 |

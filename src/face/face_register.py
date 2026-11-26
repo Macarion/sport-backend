@@ -1,10 +1,10 @@
-# core/face_register.py
+# face/face_register.py
 """人脸注册工具：学号 + 一张 BGR ndarray → data/faces.db（与人脸服务同库同模型）。
 
-库内调用：from core.face_register import register_face
+库内调用：from face.face_register import register_face
 命令行（src/ 为当前目录，或直跑脚本）：
-    python -m core.face_register <学号> <图片路径>
-    python core/face_register.py <学号> <图片路径>
+    python -m face.face_register <学号> <图片路径>
+    python face/face_register.py <学号> <图片路径>
 同 学号 重复注册会覆盖旧特征（sdk 内先删后建）。
 """
 import sys
