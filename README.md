@@ -35,5 +35,3 @@ start.bat        :: 等价于 python src/main.py
 - **生命周期**：显式 stop、WS 断线、60s 空闲、进程崩溃（error 消息）四路径销毁，`_finalize` 幂等收尾。
 - **注册表**：`core/registry.py` 字符串懒注册，web 只读 keys；启动预热进程遍历全解析（结构性保证 web 零体育代码）。
 - **扩展新项目**：`sports/` 加一个文件 + `registry.py` 加一行字符串，其余全自动（预热自检、keys 校验、error 通道）。
-
-术语见仓库根 `GLOSSARY.md`。
