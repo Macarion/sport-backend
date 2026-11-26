@@ -301,6 +301,11 @@ class Evaluator:
 
         # ========== 等躺下阶段：躺下合格进入测试（FLAT） ==========
         if self.state == State.READY:
+            # 地面基准线拟合与胯部参照/方向记录同帧确定（转 FLAT 帧即最终依据，
+            # 前端可据红色基准线复核方向判定）
+            self._fit_ground_line(points)
+            self._record_hip_reference(points)
+
             # 躯干与地面基准夹角差<=10，肩、头、脚关键点在拟合地面线下方（容差 0.05h）
             body_ground = angle_deg(xy(points[5]), xy(points[11]), (w, points[11].y))
             base_angle = angle_deg(xy(points[11]), xy(points[15]), (w, points[15].y))
@@ -311,10 +316,6 @@ class Evaluator:
                 and points[11].y <= self.ground_slope * points[11].x + self.ground_offset + h * 0.05
                 and points[5].y <= self.ground_slope * points[5].x + self.ground_offset + h * 0.05
             ):
-                # 地面基准线拟合与胯部参照/方向记录同帧确定（转 FLAT 帧即最终依据，
-                # 前端可据红色基准线复核方向判定）
-                self._fit_ground_line(points)
-                self._record_hip_reference(points)
 
                 self.ready_count += 1
                 # 10帧预备姿态，正式开启测试

@@ -962,6 +962,8 @@ def AngleCalculate(x, y):
     a = (x[0] - x[1]) ** 2 + (y[0] - y[1]) ** 2
     b = (x[0] - x[2]) ** 2 + (y[0] - y[2]) ** 2
     c = (x[1] - x[2]) ** 2 + (y[1] - y[2]) ** 2
+    if 4*a*c == 0:
+        return 90
     angle = abs(math.degrees(math.acos((a+c-b)/math.sqrt(4*a*c))))
     return angle
 

@@ -45,7 +45,7 @@ SITUP_MARKER_LOWER = (35, 50, 100)
 SITUP_MARKER_UPPER = (100, 255, 255)
 
 # ---------- 仰卧起坐胯部漂移（换人误检忽略 / 大幅移动判定） ----------
-SITUP_HIP_DRIFT_WINDOW = 1.0     # 连续无效墙钟时长（秒），超过即判"大幅移动"作弊
+SITUP_HIP_DRIFT_WINDOW = 3.0     # 连续无效墙钟时长（秒），超过即判"大幅移动"作弊
 SITUP_HIP_DRIFT_THRESHOLD = 0.12  # 胯部中点与参照的分轴偏移阈值（1 = 画面宽）
 SITUP_HIP_DRIFT_ALPHA = 0.05      # 胯部参照 EMA 权重（原膝盖检测同值）
 SITUP_HIP_DRIFT_EMA_MAX = 0.05    # EMA 更新准入：分轴位移≤该值才慢跟随（1=画面宽）
